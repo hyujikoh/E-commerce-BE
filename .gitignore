@@ -38,3 +38,9 @@ out/
 
 ### Kotlin ###
 .kotlin
+
+### /dev pipeline artifacts ###
+.dev/
+
+### Git worktrees ###
+worktrees/
