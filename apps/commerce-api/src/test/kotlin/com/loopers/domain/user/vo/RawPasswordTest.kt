@@ -12,67 +12,76 @@ import java.time.LocalDate
 class RawPasswordTest {
     private val birthDate = BirthDate(LocalDate.of(1990, 1, 15))
 
-    @DisplayName("8자 이상 16자 이하의 화이트리스트 문자만 포함하면 정상 생성된다 (AC-10).")
+    // AC-10
+    @DisplayName("비밀번호가 정확히 최소 길이(8자)면 허용된다")
     @Test
     fun createsRawPassword_whenLengthIsEight() {
         assertDoesNotThrow { RawPassword("abcd1234", birthDate) }
     }
 
-    @DisplayName("16자 경계값에서도 정상 생성된다 (AC-11).")
+    // AC-11
+    @DisplayName("비밀번호가 정확히 최대 길이(16자)면 허용된다")
     @Test
     fun createsRawPassword_whenLengthIsSixteen() {
         assertDoesNotThrow { RawPassword("Abcdef1234!@#$%^", birthDate) }
     }
 
-    @DisplayName("7자 비밀번호는 거부된다 (AC-9, AC-31).")
+    // AC-9, AC-31
+    @DisplayName("비밀번호가 최소 길이(8자) 미만이면 거부된다")
     @Test
     fun throwsBadRequest_whenLengthIsSeven() {
         val ex = assertThrows<CoreException> { RawPassword("abc1234", birthDate) }
         assertThat(ex.errorType).isEqualTo(ErrorType.BAD_REQUEST)
     }
 
-    @DisplayName("17자 비밀번호는 거부된다 (AC-12).")
+    // AC-12
+    @DisplayName("비밀번호가 최대 길이(16자)를 초과하면 거부된다")
     @Test
     fun throwsBadRequest_whenLengthIsSeventeen() {
         val ex = assertThrows<CoreException> { RawPassword("Abcdef1234!@#$%^&", birthDate) }
         assertThat(ex.errorType).isEqualTo(ErrorType.BAD_REQUEST)
     }
 
-    @DisplayName("비밀번호에 한글이 포함되면 거부된다 (AC-13).")
+    // AC-13
+    @DisplayName("비밀번호에 한글이 포함되면 거부된다")
     @Test
     fun throwsBadRequest_whenPasswordContainsKorean() {
         val ex = assertThrows<CoreException> { RawPassword("abcd1234가", birthDate) }
         assertThat(ex.errorType).isEqualTo(ErrorType.BAD_REQUEST)
     }
 
-    @DisplayName("비밀번호에 공백이 포함되면 거부된다 (AC-14).")
+    // AC-14
+    @DisplayName("비밀번호에 공백 문자가 포함되면 거부된다")
     @Test
     fun throwsBadRequest_whenPasswordContainsWhitespace() {
         val ex = assertThrows<CoreException> { RawPassword("abcd 1234", birthDate) }
         assertThat(ex.errorType).isEqualTo(ErrorType.BAD_REQUEST)
     }
 
-    @DisplayName("yyyyMMdd 포맷의 생년월일이 포함되면 거부된다 (AC-15).")
+    // AC-15
+    @DisplayName("비밀번호에 생년월일이 yyyyMMdd 형태로 포함되면 거부된다")
     @Test
     fun throwsBadRequest_whenPasswordContainsBirthDateYyyyMmDd() {
         val ex = assertThrows<CoreException> { RawPassword("aa19900115", birthDate) }
         assertThat(ex.errorType).isEqualTo(ErrorType.BAD_REQUEST)
     }
 
-    @DisplayName("yyyy-MM-dd 포맷의 생년월일이 포함되면 거부된다 (AC-16).")
+    // AC-16
+    @DisplayName("비밀번호에 생년월일이 yyyy-MM-dd 형태로 포함되면 거부된다")
     @Test
     fun throwsBadRequest_whenPasswordContainsBirthDateYyyyDashMmDashDd() {
         val ex = assertThrows<CoreException> { RawPassword("a1990-01-15", birthDate) }
         assertThat(ex.errorType).isEqualTo(ErrorType.BAD_REQUEST)
     }
 
-    @DisplayName("생년월일 부분 일치(9001)는 허용된다 (AC-17).")
+    // AC-17
+    @DisplayName("생년월일의 일부 숫자만 포함된 비밀번호는 허용된다")
     @Test
     fun createsRawPassword_whenPartialBirthMatch() {
         assertDoesNotThrow { RawPassword("abc9001de", birthDate) }
     }
 
-    @DisplayName("특수문자만으로도 정상 생성된다.")
+    @DisplayName("허용된 특수문자만으로 구성된 비밀번호도 허용된다")
     @Test
     fun createsRawPassword_withPunctuationOnly() {
         assertDoesNotThrow { RawPassword("!@#$%^&*", birthDate) }

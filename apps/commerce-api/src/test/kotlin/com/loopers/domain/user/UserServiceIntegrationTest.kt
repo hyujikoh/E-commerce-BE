@@ -50,7 +50,8 @@ class UserServiceIntegrationTest @Autowired constructor(
     @DisplayName("회원 가입할 때,")
     @Nested
     inner class SignUp {
-        @DisplayName("비밀번호는 BCrypt 해시로 저장된다 (AC-2).")
+        // AC-2
+        @DisplayName("회원 가입 시 비밀번호는 BCrypt 해시로 변환되어 저장된다")
         @Test
         fun storesBcryptHash() {
             val plain = "Pass1234!"
@@ -65,7 +66,8 @@ class UserServiceIntegrationTest @Autowired constructor(
             )
         }
 
-        @DisplayName("이미 사용 중인 loginId면 DataIntegrityViolationException이 발생한다 (AC-18).")
+        // AC-18
+        @DisplayName("이미 사용 중인 loginId로 가입하면 UNIQUE 제약 위반으로 차단된다")
         @Test
         fun throwsDataIntegrityViolation_whenLoginIdDuplicate() {
             signUpFixture(loginId = "duplicateId")
@@ -79,7 +81,8 @@ class UserServiceIntegrationTest @Autowired constructor(
     @DisplayName("비밀번호를 변경할 때,")
     @Nested
     inner class ChangePassword {
-        @DisplayName("변경 후 새 비밀번호로 인증할 수 있다 (AC-29).")
+        // AC-29
+        @DisplayName("비밀번호 변경 후에는 새 비밀번호로 인증이 성공한다")
         @Test
         fun authenticatesWithNewPassword_afterChange() {
             signUpFixture(password = "OldPass1!")
@@ -94,7 +97,8 @@ class UserServiceIntegrationTest @Autowired constructor(
             assertThat(updated.password.matches("NewPass99!", passwordEncoder)).isTrue()
         }
 
-        @DisplayName("변경 후 기존 비밀번호로는 인증할 수 없다 (AC-30).")
+        // AC-30
+        @DisplayName("비밀번호 변경 후에는 기존 비밀번호로 인증할 수 없다")
         @Test
         fun rejectsOldPassword_afterChange() {
             signUpFixture(password = "OldPass1!")
@@ -109,7 +113,8 @@ class UserServiceIntegrationTest @Autowired constructor(
             assertThat(updated.password.matches("OldPass1!", passwordEncoder)).isFalse()
         }
 
-        @DisplayName("새 비밀번호에 생년월일(yyyyMMdd)이 포함되면 BAD_REQUEST 예외가 발생한다 (AC-32).")
+        // AC-32
+        @DisplayName("새 비밀번호에 생년월일이 포함되면 변경이 거부된다")
         @Test
         fun throwsBadRequest_whenNewPasswordContainsBirthDate() {
             signUpFixture(password = "OldPass1!")
@@ -124,7 +129,8 @@ class UserServiceIntegrationTest @Autowired constructor(
             assertThat(ex.errorType).isEqualTo(ErrorType.BAD_REQUEST)
         }
 
-        @DisplayName("새 비밀번호가 현재와 동일하면 BAD_REQUEST 예외가 발생한다 (AC-33).")
+        // AC-33
+        @DisplayName("새 비밀번호가 현재 비밀번호와 같으면 변경이 거부된다")
         @Test
         fun throwsBadRequest_whenNewPasswordEqualsCurrent() {
             signUpFixture(password = "SamePass1!")

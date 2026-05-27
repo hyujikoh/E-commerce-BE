@@ -36,7 +36,7 @@ class UserModelTest {
     @DisplayName("회원을 생성할 때,")
     @Nested
     inner class Create {
-        @DisplayName("필수 정보가 유효하면 정상 생성된다.")
+        @DisplayName("필수 정보가 모두 유효하면 회원이 정상 생성된다")
         @Test
         fun createsUser_whenAllFieldsAreValid() {
             val user = newUser()
@@ -48,7 +48,8 @@ class UserModelTest {
             )
         }
 
-        @DisplayName("loginId가 한글/특수문자를 포함하면 BAD_REQUEST 예외가 발생한다 (AC-3).")
+        // AC-3
+        @DisplayName("loginId에 영문/숫자 외 문자가 포함되면 회원 생성이 거부된다")
         @Test
         fun throwsBadRequest_whenLoginIdContainsInvalidChars() {
             val raw = RawPassword(currentPlain, birthDate)
@@ -69,7 +70,7 @@ class UserModelTest {
     @DisplayName("비밀번호를 변경할 때,")
     @Nested
     inner class ChangePassword {
-        @DisplayName("현재 비밀번호가 일치하고 새 비밀번호가 정책을 만족하면 변경된다.")
+        @DisplayName("현재 비밀번호가 일치하고 새 비밀번호가 정책을 만족하면 비밀번호가 변경된다")
         @Test
         fun changesPassword_whenCurrentMatchesAndNewIsValid() {
             val user = newUser()
@@ -80,7 +81,8 @@ class UserModelTest {
             assertThat(user.password.matches("NewPass99!", encoder)).isTrue()
         }
 
-        @DisplayName("새 비밀번호가 현재 비밀번호와 동일하면 BAD_REQUEST 예외가 발생한다 (AC-33).")
+        // AC-33
+        @DisplayName("새 비밀번호가 현재 비밀번호와 같으면 변경이 거부된다")
         @Test
         fun throwsBadRequest_whenNewPasswordEqualsCurrent() {
             val user = newUser()

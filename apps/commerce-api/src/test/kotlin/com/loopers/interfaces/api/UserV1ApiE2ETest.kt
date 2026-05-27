@@ -86,7 +86,8 @@ class UserV1ApiE2ETest @Autowired constructor(
     @DisplayName("POST /api/v1/users")
     @Nested
     inner class SignUp {
-        @DisplayName("AC-1: 유효한 6개 필드를 보내면 201 + loginId 응답을 반환한다.")
+        // AC-1
+        @DisplayName("유효한 회원 정보로 가입 요청하면 201과 loginId를 반환한다")
         @Test
         fun returnsCreatedWithLoginId_whenValid() {
             val body = validSignUpBody()
@@ -100,7 +101,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             )
         }
 
-        @DisplayName("AC-2: 응답 본문에 비밀번호 평문/해시가 포함되지 않는다 (NFR-3).")
+        // AC-2, NFR-3
+        @DisplayName("회원 가입 응답 본문에는 비밀번호 평문이나 해시가 포함되지 않는다")
         @Test
         fun responseDoesNotIncludePassword() {
             val body = validSignUpBody(password = "Pass1234!")
@@ -117,7 +119,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             )
         }
 
-        @DisplayName("AC-3: loginId에 한글 포함 → 400.")
+        // AC-3
+        @DisplayName("loginId에 한글이 포함되면 회원 가입이 거부된다")
         @Test
         fun returnsBadRequest_whenLoginIdContainsKorean() {
             val body = validSignUpBody(loginId = "한글ID")
@@ -125,7 +128,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         }
 
-        @DisplayName("AC-4: 이메일에 @가 없으면 400.")
+        // AC-4
+        @DisplayName("이메일 형식이 올바르지 않으면 회원 가입이 거부된다")
         @Test
         fun returnsBadRequest_whenEmailHasNoAt() {
             val body = validSignUpBody(email = "invalid-email")
@@ -133,7 +137,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         }
 
-        @DisplayName("AC-5: 존재하지 않는 생년월일(1999-02-31) → 400.")
+        // AC-5
+        @DisplayName("실재하지 않는 날짜를 생년월일로 보내면 회원 가입이 거부된다")
         @Test
         fun returnsBadRequest_whenBirthDateIsInvalid() {
             val body = validSignUpBody(birth = "1999-02-31")
@@ -141,7 +146,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         }
 
-        @DisplayName("AC-6: 휴대폰 자릿수 위반 → 400.")
+        // AC-6
+        @DisplayName("휴대폰 자릿수가 형식을 벗어나면 회원 가입이 거부된다")
         @Test
         fun returnsBadRequest_whenPhoneDigitsInvalid() {
             val body = validSignUpBody(phoneNumber = "010-12345-6789")
@@ -149,7 +155,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         }
 
-        @DisplayName("AC-7: 휴대폰 하이픈 누락 → 400.")
+        // AC-7
+        @DisplayName("휴대폰 번호에 하이픈이 없으면 회원 가입이 거부된다")
         @Test
         fun returnsBadRequest_whenPhoneHasNoHyphen() {
             val body = validSignUpBody(phoneNumber = "01012345678")
@@ -157,7 +164,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         }
 
-        @DisplayName("AC-8: 이름 빈 문자열 → 400.")
+        // AC-8
+        @DisplayName("이름이 빈 문자열이면 회원 가입이 거부된다")
         @Test
         fun returnsBadRequest_whenNameIsBlank() {
             val body = validSignUpBody(name = "")
@@ -165,7 +173,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         }
 
-        @DisplayName("AC-9: 비밀번호 7자 → 400.")
+        // AC-9
+        @DisplayName("비밀번호가 최소 길이(8자) 미만이면 회원 가입이 거부된다")
         @Test
         fun returnsBadRequest_whenPasswordIsSevenChars() {
             val body = validSignUpBody(password = "Pas123!")
@@ -173,7 +182,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         }
 
-        @DisplayName("AC-10: 비밀번호 8자(경계) → 201.")
+        // AC-10
+        @DisplayName("비밀번호가 정확히 최소 길이(8자)면 회원 가입이 성공한다")
         @Test
         fun returnsCreated_whenPasswordIsEightChars() {
             val body = validSignUpBody(password = "Pass123!")
@@ -181,7 +191,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.CREATED)
         }
 
-        @DisplayName("AC-15: 비밀번호에 생년월일(yyyyMMdd) 포함 → 400.")
+        // AC-15
+        @DisplayName("비밀번호에 생년월일이 포함되면 회원 가입이 거부된다")
         @Test
         fun returnsBadRequest_whenPasswordContainsBirthYyyyMmDd() {
             val body = validSignUpBody(password = "ab19900115")
@@ -189,7 +200,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         }
 
-        @DisplayName("AC-18: 이미 가입된 loginId로 가입 → 409 + DUPLICATE_LOGIN_ID.")
+        // AC-18
+        @DisplayName("이미 가입된 loginId로 가입을 시도하면 DUPLICATE_LOGIN_ID 오류로 차단된다")
         @Test
         fun returnsConflict_whenLoginIdDuplicate() {
             postSignUp(validSignUpBody(loginId = "dupId"))
@@ -211,7 +223,8 @@ class UserV1ApiE2ETest @Autowired constructor(
     @DisplayName("GET /api/v1/users/me")
     @Nested
     inner class GetMyInfo {
-        @DisplayName("AC-19/20/22: 유효한 헤더 → 200, 이름·휴대폰 마스킹.")
+        // AC-19, AC-20, AC-22
+        @DisplayName("유효한 인증 헤더로 내 정보를 조회하면 이름과 휴대폰이 마스킹된 응답을 받는다")
         @Test
         fun returnsOkWithMaskedFields() {
             seedUser(nameValue = "홍길동", phone = "010-1234-5678")
@@ -233,7 +246,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             )
         }
 
-        @DisplayName("AC-21: 1글자 이름은 *로 마스킹된다.")
+        // AC-21
+        @DisplayName("한 글자 이름은 내 정보 조회 응답에서 *로 마스킹된다")
         @Test
         fun masksSingleCharNameAsAsterisk() {
             seedUser(nameValue = "이")
@@ -252,7 +266,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             )
         }
 
-        @DisplayName("AC-23: X-Loopers-LoginId 헤더 누락 → 400.")
+        // AC-23
+        @DisplayName("loginId 인증 헤더가 누락되면 내 정보 조회 요청이 거부된다")
         @Test
         fun returnsBadRequest_whenLoginIdHeaderMissing() {
             seedUser()
@@ -264,7 +279,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         }
 
-        @DisplayName("AC-24: X-Loopers-LoginPw 헤더 누락 → 400.")
+        // AC-24
+        @DisplayName("loginPw 인증 헤더가 누락되면 내 정보 조회 요청이 거부된다")
         @Test
         fun returnsBadRequest_whenLoginPwHeaderMissing() {
             seedUser()
@@ -276,7 +292,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         }
 
-        @DisplayName("AC-25: 존재하지 않는 loginId 헤더 → 401.")
+        // AC-25
+        @DisplayName("존재하지 않는 loginId로 내 정보를 조회하면 인증 실패로 응답한다")
         @Test
         fun returnsUnauthorized_whenLoginIdNotExists() {
             val responseType = object : ParameterizedTypeReference<ApiResponse<UserV1Dto.UserInfoResponse>>() {}
@@ -291,7 +308,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
         }
 
-        @DisplayName("AC-26: 존재하는 loginId + 잘못된 비번 → 401.")
+        // AC-26
+        @DisplayName("존재하는 loginId라도 비밀번호가 일치하지 않으면 인증 실패로 응답한다")
         @Test
         fun returnsUnauthorized_whenPasswordMismatch() {
             seedUser()
@@ -307,7 +325,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
         }
 
-        @DisplayName("AC-27: 응답 본문에 비밀번호가 포함되지 않는다.")
+        // AC-27
+        @DisplayName("내 정보 조회 응답 본문에는 비밀번호 평문이나 해시가 포함되지 않는다")
         @Test
         fun responseDoesNotIncludePassword() {
             seedUser(plainPassword = "Pass1234!")
@@ -332,7 +351,8 @@ class UserV1ApiE2ETest @Autowired constructor(
     @DisplayName("PATCH /api/v1/users/me/password")
     @Nested
     inner class ChangePassword {
-        @DisplayName("AC-28: 유효한 헤더 + 정책 통과 newPassword → 200, data:null.")
+        // AC-28
+        @DisplayName("유효한 인증과 정책을 만족하는 새 비밀번호로 요청하면 비밀번호 변경이 성공한다")
         @Test
         fun returnsOk_whenValid() {
             seedUser(plainPassword = "OldPass1!")
@@ -351,7 +371,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             )
         }
 
-        @DisplayName("AC-29/30: 변경 후 새 비번 200, 기존 비번 401.")
+        // AC-29, AC-30
+        @DisplayName("비밀번호 변경 직후에는 새 비밀번호로만 인증이 성공하고 기존 비밀번호로는 실패한다")
         @Test
         fun authenticationStateSwitches_afterChange() {
             seedUser(plainPassword = "OldPass1!")
@@ -384,7 +405,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             )
         }
 
-        @DisplayName("AC-32: newPassword에 생년월일(yyyyMMdd) 포함 → 400.")
+        // AC-32
+        @DisplayName("새 비밀번호에 생년월일이 포함되면 비밀번호 변경이 거부된다")
         @Test
         fun returnsBadRequest_whenNewPasswordContainsBirthDate() {
             seedUser(plainPassword = "OldPass1!")
@@ -400,7 +422,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         }
 
-        @DisplayName("AC-33: newPassword가 현재 비번과 동일 → 400.")
+        // AC-33
+        @DisplayName("새 비밀번호가 현재 비밀번호와 같으면 비밀번호 변경이 거부된다")
         @Test
         fun returnsBadRequest_whenNewPasswordEqualsCurrent() {
             seedUser(plainPassword = "SamePass1!")
@@ -416,7 +439,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.BAD_REQUEST)
         }
 
-        @DisplayName("AC-34: 헤더 비번 불일치 상태에서 변경 시도 → 401.")
+        // AC-34
+        @DisplayName("인증 헤더의 비밀번호가 일치하지 않으면 비밀번호 변경 요청은 인증 실패로 응답한다")
         @Test
         fun returnsUnauthorized_whenHeaderPasswordMismatch() {
             seedUser(plainPassword = "OldPass1!")
@@ -432,7 +456,8 @@ class UserV1ApiE2ETest @Autowired constructor(
             assertThat(response.statusCode).isEqualTo(HttpStatus.UNAUTHORIZED)
         }
 
-        @DisplayName("AC-35: 헤더 누락 상태에서 변경 시도 → 400.")
+        // AC-35
+        @DisplayName("인증 헤더가 누락되면 비밀번호 변경 요청이 거부된다")
         @Test
         fun returnsBadRequest_whenHeaderMissing() {
             seedUser(plainPassword = "OldPass1!")

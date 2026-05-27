@@ -8,33 +8,36 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 
 class NameTest {
-    @DisplayName("빈 이름은 거부된다 (AC-8).")
+    // AC-8
+    @DisplayName("빈 문자열로 이름을 만들면 거부된다")
     @Test
     fun throwsBadRequest_whenNameIsBlank() {
         val ex = assertThrows<CoreException> { Name("") }
         assertThat(ex.errorType).isEqualTo(ErrorType.BAD_REQUEST)
     }
 
-    @DisplayName("공백만으로 구성된 이름은 거부된다.")
+    @DisplayName("공백 문자로만 구성된 이름은 거부된다")
     @Test
     fun throwsBadRequest_whenNameIsWhitespace() {
         val ex = assertThrows<CoreException> { Name("   ") }
         assertThat(ex.errorType).isEqualTo(ErrorType.BAD_REQUEST)
     }
 
-    @DisplayName("이름 마지막 글자를 *로 치환한다 (AC-20).")
+    // AC-20
+    @DisplayName("두 글자 이상의 이름은 마지막 한 글자를 *로 마스킹한다")
     @Test
     fun masksLastCharacter() {
         assertThat(Name("홍길동").masked()).isEqualTo("홍길*")
     }
 
-    @DisplayName("1글자 이름은 전체를 *로 마스킹한다 (AC-21).")
+    // AC-21
+    @DisplayName("한 글자 이름은 글자 전체를 *로 마스킹한다")
     @Test
     fun masksSingleCharacter() {
         assertThat(Name("이").masked()).isEqualTo("*")
     }
 
-    @DisplayName("영문 이름도 마지막 글자가 *로 치환된다.")
+    @DisplayName("영문 이름도 마지막 한 글자를 *로 마스킹한다")
     @Test
     fun masksEnglishName() {
         assertThat(Name("John").masked()).isEqualTo("Joh*")
