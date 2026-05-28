@@ -27,7 +27,7 @@
 1. **예약 생성 + 결제** (PENDING → CONFIRMED / CANCELLED)
 2. **PENDING 만료 + 재고 복구** (스케줄러)
 3. **검색 + 가격 합산**
-4. 수동 취소 (CONFIRMED → CANCELLED) — 후속 커밋
+4. **수동 취소** (PENDING / CONFIRMED → CANCELLED)
 
 ---
 
@@ -248,3 +248,74 @@ sequenceDiagram
 - **대량 결과 응답** — 도시에 Property 1000개, 각 5개 RoomType, 7박 검색이면 inventory row 35,000개를 application으로 가져오게 됨. → 단계별로 1차 필터 후 IN 좁히기, 또는 DB 차원 `EXISTS` 서브쿼리로 일자 필터링.
 - **검색 가격과 예약 가격의 갭** — 가격 변경 직후 검색한 사용자가 옛 가격으로 결과를 받음. B2 합의로 예약 시점에 스냅샷이 갱신되므로 청구는 안전하지만, "검색한 가격과 다르다"는 사용자 불만 가능성. UI/응답에 "검색 시점 기준 가격" 표기 권장.
 - **인덱스 의존성** — `daily_room_inventory(room_type_id, date)` 복합 인덱스가 필수. 없으면 풀스캔. ERD에 인덱스 명시 필요.
+
+---
+
+## 4. 수동 취소 (게스트 요청)
+
+### 이 다이어그램이 필요한 이유
+
+- 자동 취소(시퀀스 2: PENDING 만료)와 **사용자 명시 취소**가 같은 도메인 함수(`Reservation.cancel`)를 공유한다는 점을 검증.
+- `cancel_reason`이 분기 키이고, **환불 산정은 별도 도메인 이벤트로 위임**한다는 경계를 확정 (P5=A 합의).
+- "CHECKED_IN 이후 취소 불가" 정책이 상태 가드로 명시되는지 확인.
+
+### 다이어그램
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Guest
+  participant Ctrl as ReservationController
+  participant Svc as ReservationService
+  participant Inv as InventoryService
+  participant Bus as DomainEventBus
+  participant DB
+
+  Guest->>Ctrl: POST /api/v1/reservations/{id}/cancel
+  Ctrl->>Svc: cancel(reservationId, guestId)
+
+  Svc->>DB: SELECT Reservation WHERE id=?
+  DB-->>Svc: reservation
+
+  alt reservation.guestId != guestId
+    Svc-->>Ctrl: 403 FORBIDDEN
+    Ctrl-->>Guest: 본인 예약 아님
+  else status ∉ {PENDING, CONFIRMED}
+    Note right of Svc: CHECKED_IN/CHECKED_OUT/CANCELLED/NO_SHOW는 취소 불가
+    Svc-->>Ctrl: 409 CONFLICT (취소 불가 상태)
+    Ctrl-->>Guest: 상태 안내
+  else 취소 가능
+    Note over Svc,DB: 단일 RDB 트랜잭션
+    Svc->>DB: UPDATE Reservation<br/>SET status='CANCELLED',<br/> cancel_reason='USER_REQUEST',<br/> canceled_at=NOW()<br/>WHERE id=? AND status IN ('PENDING','CONFIRMED')
+    DB-->>Svc: affected rows
+
+    alt affected rows = 0 (만료 스케줄러 등이 먼저 전이)
+      Svc->>DB: ROLLBACK
+      Svc-->>Ctrl: 409 CONFLICT
+      Ctrl-->>Guest: 다시 시도 안내
+    else affected rows = 1
+      Svc->>Inv: release(roomTypeId, dates)
+      Inv->>DB: UPDATE daily_room_inventory<br/>SET remaining = remaining + 1<br/>WHERE room_type_id=? AND date IN (...)
+      Svc->>DB: COMMIT
+
+      Note over Svc,Bus: 환불 산정·실행은 후속 라운드.<br/>이번 라운드는 이벤트 발행까지만.
+      Svc->>Bus: publish ReservationCanceledEvent<br/>{reservationId, cancelReason, totalAmount,<br/> canceledAt, originalStatus}
+
+      Svc-->>Ctrl: ok
+      Ctrl-->>Guest: 200 OK + 취소 확인
+    end
+  end
+```
+
+### 이 구조에서 특히 봐야 할 포인트
+
+1. **`WHERE status IN ('PENDING','CONFIRMED')` 가드** — 시퀀스 2의 만료 스케줄러와 race가 나도 한 쪽만 성공. 두 경로 모두 같은 invariant로 보호된다.
+2. **`cancel_reason`이 다운스트림 정책의 분기 키** — `USER_REQUEST` / `EXPIRED` / `PAYMENT_FAILED` / (후속) `NO_SHOW`. 환불 정책은 이 값을 분기로 받는다.
+3. **환불은 도메인 이벤트로 위임** — `ReservationService`는 "취소되었다"는 사실만 발행. 위약금·환불액·PG 콜은 `RefundService`(후속 라운드)가 구독·처리. 책임 경계 분리.
+4. **PENDING 사용자 취소도 같은 함수 사용** — 만료 정리와 사용자 취소가 같은 `cancel(...)` 진입점을 공유, `cancel_reason`만 다름. 코드 중복 방지.
+
+### 잠재 리스크 (이 시퀀스에 한정)
+
+- **이벤트 발행과 트랜잭션 정합성** — 트랜잭션 커밋 전에 이벤트를 발행하면 "취소됐다고 알렸는데 DB는 롤백" 가능성. → outbox 패턴 도입 권장. 이번 라운드 ERD에서 `outbox` 테이블을 마련해두는 정도까지 명시.
+- **CHECKED_IN 이후 취소 시도** — 사용자가 강하게 요청하는 케이스(호스트 컴플레인 등) → 운영 채널 분리. 시스템에서는 일관되게 409 응답.
+- **결제는 됐는데 취소 시점이 환불 마감 후** — 위약금 100% 케이스. 이번 라운드 모델로는 이벤트만 발행하고 `RefundService`가 후속 처리. 사용자 알림 일관성은 후속 라운드 과제.
