@@ -1,0 +1,50 @@
+# 공유 인프라 (Shared Infrastructure)
+# 도메인 간 공통으로 사용되는 인프라 컴포넌트의 인스턴스.
+# 각 도메인 abox 파일에서 `deployed_in` 또는 `depends_on` 관계로 이 entity들을 참조한다.
+#
+# 규칙 (tbox.yaml axiom 참조):
+# - infra entity는 wiki_doc, repo, package 필드를 갖지 않는다.
+# - id는 도메인 전체에서 유일해야 한다.
+
+entities:
+  - id: mysql
+    name: MySQL
+    type: infra
+    summary: |
+      메인 RDB. 주문, 회원, 상품 마스터 등 트랜잭션과 강한 일관성이 필요한
+      비즈니스 데이터의 영속 저장소. 도메인별로 논리적 스키마를 분리해 사용한다.
+
+  - id: redis
+    name: Redis
+    type: infra
+    summary: |
+      인메모리 캐시 + 분산 락 + 단기 세션 저장소. 상품 상세 캐시, 재고 차감 시
+      동시성 제어용 분산 락, 장바구니 세션 등에 사용한다.
+
+  - id: kafka
+    name: Kafka
+    type: infra
+    summary: |
+      도메인 간 이벤트 스트림. 주문 생성/취소, 결제 완료, 재고 변동 등의
+      도메인 이벤트를 비동기로 전파한다. 컨슈머는 도메인별로 group을 분리한다.
+
+  - id: s3
+    name: S3
+    type: infra
+    summary: |
+      오브젝트 스토리지. 상품 이미지, 송장/인보이스 PDF 등 바이너리 자산을
+      저장한다. CDN을 통해 외부 노출되며 원본은 비공개 버킷에 둔다.
+
+  - id: elasticsearch
+    name: Elasticsearch
+    type: infra
+    summary: |
+      검색 인덱스. 상품 검색, 카테고리/속성 기반 필터링, 키워드 자동완성에
+      사용한다. MySQL 상품 마스터를 Kafka 이벤트로 동기화한다.
+
+  - id: cloudfront
+    name: CloudFront
+    type: infra
+    summary: |
+      CDN. S3에 저장된 상품 이미지를 전 세계 엣지에서 캐시하여 제공한다.
+      이미지 리사이즈는 엣지 람다에서 처리한다.

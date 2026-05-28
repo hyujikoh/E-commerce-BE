@@ -1,0 +1,201 @@
+# T-Box (Terminological Box)
+# 온톨로지의 용어 정의. 클래스, 프로퍼티, Axiom을 정의한다.
+# A-Box(abox/)의 인스턴스들은 이 T-Box에서 정의한 용어를 사용한다.
+
+# ══════════════════════════════════════
+# Classes (개념 타입)
+# ══════════════════════════════════════
+
+entity_types:
+  - id: service
+    description: 독립적으로 배포·운영되는 서비스 단위. 현재 도메인들은 process/data 수준으로 분해하여 service 타입 미사용. 다중 서비스가 하나의 도메인을 구성하는 경우에 사용
+  - id: process
+    description: 서비스 내 데이터 처리 흐름 (파이프라인, 배치 등)
+  - id: data
+    description: 도메인 핵심 데이터 개념 (원장, 재화, 세그먼트 등)
+  - id: table
+    description: DB 테이블. 컬럼 상세는 wiki 문서에 위임
+  - id: infra
+    description: 인프라 구성요소 (DB, 캐시, 메시지 큐, 스토리지 등)
+  - id: external
+    description: 도메인 외부 의존 서비스·시스템
+
+# ══════════════════════════════════════
+# Object Properties (관계 유형)
+# ══════════════════════════════════════
+
+relation_types:
+  # 구조
+  - id: part_of
+    description: ~의 일부다
+  - id: owns
+    description: ~를 소유한다 (테이블, 하위 리소스)
+
+  # 데이터 흐름
+  - id: consumes
+    description: ~를 입력으로 사용한다
+  - id: produces
+    description: ~를 출력한다
+
+  # 의존·제공
+  - id: depends_on
+    description: ~가 있어야 동작한다
+  - id: provides
+    description: ~에게 서비스·API를 제공한다
+  - id: references
+    description: 소유·의존 없이 단방향 참조한다
+
+  # 상태·흐름 제어
+  - id: triggers
+    description: ~의 상태 변화를 유발한다
+  - id: gates
+    description: 통과해야 다음 단계로 진행 가능
+
+  # 배포
+  - id: deployed_in
+    description: ~에 배포되어 있다
+
+# ══════════════════════════════════════
+# Data Properties (필드 스키마)
+# ══════════════════════════════════════
+
+# index.yaml 도메인 항목 필드
+index_domain_fields:
+  - id: id
+    required: true
+    description: 도메인 고유 식별자
+  - id: path
+    required: true
+    description: "비즈니스 위계 경로 (예: 예시/예시-주문)"
+  - id: file
+    required: true
+    description: 도메인 ontology 파일명 (abox/ 하위)
+  - id: summary
+    required: true
+    description: 도메인 핵심 기능 요약
+  - id: repos
+    required: false
+    description: 관련 코드 레포 목록
+  - id: infra
+    required: false
+    description: 사용하는 인프라 목록
+
+# index.yaml 전역 필드
+index_global_fields:
+  - id: cross_domain
+    required: true
+    description: 도메인 간 관계 파일 경로 (abox/cross-domain.yaml)
+  - id: shared_infra
+    required: true
+    description: 공유 인프라 파일 경로 (abox/infra.yaml)
+
+# A-Box domain 헤더 필드 (각 abox 파일 최상단 domain: 섹션)
+domain_fields:
+  - id: id
+    required: true
+    description: 도메인 고유 식별자 (index.yaml의 id와 일치)
+  - id: name
+    required: true
+    description: 사람이 읽을 수 있는 도메인명
+  - id: summary
+    required: true
+    description: 도메인 핵심 기능 요약
+  - id: wiki_root
+    required: true
+    description: wiki 문서 루트 경로 (wiki/{도메인}/)
+
+# A-Box entity 필드
+entity_fields:
+  - id: id
+    required: true
+    description: 도메인 내 고유 식별자
+  - id: name
+    required: true
+    description: 사람이 읽을 수 있는 이름
+  - id: type
+    required: true
+    description: 개념 타입 (entity_types 참조)
+  - id: summary
+    required: true
+    description: 개념 설명. 코드 수준 근거 포함
+  - id: wiki_doc
+    required: false
+    description: wiki 문서 경로 (비즈니스 정책/의사결정)
+  - id: repo
+    required: false
+    description: 코드가 있는 레포명
+  - id: package
+    required: false
+    description: 코드 패키지/디렉토리 경로
+  - id: status
+    required: false
+    description: 엔티티 lifecycle 상태. 생략 시 active. [active, planned, deprecated]
+
+# A-Box relation 필드
+relation_fields:
+  - id: from
+    required: true
+    description: 관계 출발 entity id
+  - id: to
+    required: true
+    description: 관계 도착 entity id
+  - id: type
+    required: true
+    description: 관계 유형 (relation_types 참조)
+  - id: note
+    required: false
+    description: 관계에 대한 코드 수준 근거나 조건
+
+# ══════════════════════════════════════
+# Axioms (제약 규칙)
+# ══════════════════════════════════════
+
+# Domain/Range: 관계의 출발/도착 entity type 제한
+domain_range:
+  consumes:    { from: [process], to: [data, infra, external] }
+  produces:    { from: [process], to: [data, infra] }
+  owns:        { from: [data], to: [data, table] }
+  triggers:    { from: [process, data], to: [process, data] }
+  gates:       { from: [process], to: [process] }
+  deployed_in: { from: [process, data], to: [infra] }
+  references:  { from: [process], to: [data, external] }
+  provides:    { from: [data, process], to: [process, data] }
+  part_of:     { from: [process, data], to: [process, data] }
+  depends_on:  { from: [all], to: [all] }
+
+# Existence: entity type별 필드 필수/금지
+existence:
+  process:  { repo: required, package: recommended, wiki_doc: optional }
+  data:     { repo: required, package: recommended, wiki_doc: optional }
+  table:    { repo: required, package: recommended, wiki_doc: forbidden }
+  service:  { repo: required, package: required, wiki_doc: optional }
+  infra:    { repo: forbidden, package: forbidden, wiki_doc: forbidden }
+  external: { repo: forbidden, package: forbidden, wiki_doc: forbidden }
+
+# Disjointness: 타입 상호 배타
+disjointness:
+  entity_type: true  # 하나의 entity는 정확히 하나의 type만 가진다
+  # 경계 케이스 판단 기준: 비즈니스 로직을 포함하면 process, 순수 데이터면 data
+
+# Closure: 허용 값 제한
+closure:
+  entity_type: [service, process, data, table, infra, external]
+  relation_type: [part_of, owns, consumes, produces, depends_on, provides, references, triggers, gates, deployed_in]
+  entity_status: [active, planned, deprecated]
+  id_pattern: "^[a-z][a-z0-9-]*$"
+
+# Cardinality: 유일성 제약
+cardinality:
+  - 도메인 id는 index.yaml에서 유일
+  - entity id는 도메인 파일 내에서 유일
+  - entity는 하나의 도메인 파일에만 존재 (infra는 abox/infra.yaml에 정의)
+
+# Structural: 구조 제약
+structural:
+  - 모든 active entity는 최소 1개 relation에 참여 (고아 금지). planned/deprecated entity는 예외
+  - infra entity는 abox/infra.yaml에 한 번만 정의. 도메인 abox에서 id로 참조
+  - cross-domain from/to는 "{도메인id}/{entity-id}" 형식
+  - 코드 모듈(api/application 등)은 entity로 만들지 않는다
+  - 코드 연동 없는 수동 데이터 전달(human-in-the-loop)은 relation이 아닌 notes에 기록
+  - deprecated entity는 summary에 대체 entity를 명시
+  - 단일 도메인 내 완결 관계는 cross-domain에 넣지 않는다

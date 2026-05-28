@@ -1,0 +1,15 @@
+# Cross-Domain Relations
+# 도메인 간 관계 정의. 단일 도메인 내 완결 관계는 여기에 넣지 않는다.
+# from/to는 "{도메인id}/{entity-id}" 형식.
+#
+# 현재 (Round 2 시점):
+# - accommodation 도메인만 ontology에 등록되어 있음
+# - 1주차 commerce-user 도메인은 코드(`apps/commerce-api/.../domain/user`)에 존재하나
+#   ontology entity로는 미등록 → 후속 라운드에서 commerce-user 도메인 추가 후 관계 정의
+
+relations: []
+
+# 후속 라운드에서 추가 예정:
+# - commerce-user/user-model → accommodation/reservation (references, "guest_id")
+# - commerce-user/user-model → accommodation/property      (references, "host_id")
+# - commerce-user/user-model → accommodation/wishlist      (references, "guest_id")
