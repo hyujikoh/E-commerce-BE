@@ -26,7 +26,7 @@
 
 1. **예약 생성 + 결제** (PENDING → CONFIRMED / CANCELLED)
 2. **PENDING 만료 + 재고 복구** (스케줄러)
-3. 검색 + 가격 합산 — 후속 커밋
+3. **검색 + 가격 합산**
 4. 수동 취소 (CONFIRMED → CANCELLED) — 후속 커밋
 
 ---
@@ -186,3 +186,65 @@ sequenceDiagram
 - **결제 성공 webhook이 만료 직후 도착** — webhook이 만료 timer 직후 도착하면 PENDING → CONFIRMED 전이가 `affected rows = 0`으로 실패. 사용자는 결제됐는데 예약은 취소된 상태. → 보정 절차: webhook 처리에서 status=CANCELLED + cancel_reason=EXPIRED를 감지하면 환불 큐로 라우팅. 이번 라운드는 검출·로깅만 정의, 환불 자동화는 후속.
 - **스케줄러 주기 vs 만료 정확도** — 1분 주기이므로 최대 1분간 만료된 PENDING이 살아있을 수 있음. 경로 B(사용자 진입 시점 검사)가 이 갭을 메움.
 - **대량 만료 발생 시 N+1 release** — 한 번에 100건 정리 시 release SQL이 100회 발사. 인덱스(`room_type_id, date`)가 없으면 부하 급증. ERD 단계에서 인덱스 명시 필요.
+
+---
+
+## 3. 검색 + 가격 합산
+
+### 이 다이어그램이 필요한 이유
+
+- 요구사항 첫 줄(도시/체크인/체크아웃/인원수 검색 + 합산·평균 가격 표시)이 어떻게 데이터 조회로 구체화되는지 확인한다.
+- "재고가 0인 일자가 하루라도 있으면 그 RoomType은 검색 결과에서 제외" 규칙을 명시한다.
+- 검색은 동시성 보장이 필요 없는 **읽기 전용 hint** 라는 점을 부각 (실제 점유는 예약 시점에서만 일어남).
+
+### 다이어그램
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Guest
+  participant Ctrl as PropertyController
+  participant Svc as PropertySearchService
+  participant DB
+
+  Guest->>Ctrl: GET /api/v1/properties<br/>?city=&checkIn=&checkOut=&guestCount=
+  Ctrl->>Svc: search(criteria)
+  Svc->>Svc: 입력 검증<br/>(checkIn < checkOut, 미래 일자, guestCount >= 1)
+
+  Svc->>DB: SELECT Property<br/>WHERE city = ?
+  DB-->>Svc: properties[]
+
+  alt properties 비어있음
+    Svc-->>Ctrl: []
+    Ctrl-->>Guest: 200 OK (빈 결과)
+  else
+    Svc->>DB: SELECT RoomType<br/>WHERE property_id IN (...)<br/>AND max_occupancy >= ?  (P1)
+    DB-->>Svc: roomTypes[]
+
+    Svc->>DB: SELECT (room_type_id, date, remaining)<br/>FROM daily_room_inventory<br/>WHERE room_type_id IN (...)<br/>AND date BETWEEN checkIn AND checkOut-1<br/>AND remaining > 0
+    DB-->>Svc: availableInventoryRows[]
+
+    Svc->>Svc: 일자별 가용 row 수 == nights 인 roomType만 필터<br/>(한 일자라도 빠지면 제외)
+
+    Svc->>DB: SELECT (room_type_id, date, amount)<br/>FROM daily_room_rate<br/>WHERE room_type_id IN (필터된 ids)<br/>AND date BETWEEN checkIn AND checkOut-1
+    DB-->>Svc: rateRows[]
+
+    Svc->>Svc: roomType별 집계:<br/>totalAmount = sum(amount)<br/>avgNightlyPrice = totalAmount / nights  (P8)
+
+    Svc-->>Ctrl: SearchResult[]<br/>{ propertyId, roomTypeId, nights,<br/>  totalAmount, avgNightlyPrice }
+    Ctrl-->>Guest: 200 OK + 결과 목록
+  end
+```
+
+### 이 구조에서 특히 봐야 할 포인트
+
+1. **IN 절 기반 일괄 조회로 N+1 회피** — Property → RoomType → Inventory → Rate가 4 SELECT지만 각 단계마다 `IN (...)`으로 묶어 호출 횟수가 N에 비례하지 않음.
+2. **재고 필터는 application 레벨에서 "일자 수 일치" 로 판정** — DB에서 `remaining > 0` 인 row만 받고, `count(distinct date) == nights` 인 RoomType만 살린다. 한 일자라도 0이면 자동 제외.
+3. **가격은 DailyRoomRate 합산이 진실** — 검색 시점의 합산값과 예약 시점의 합산값이 다를 수 있음 (운영자가 그 사이에 요금을 바꿨다면). B2 합의대로 PENDING 생성 시점이 잠금 시점이므로 검색 결과는 "추정"임을 응답 명세에 명시할 것.
+4. **검색은 트랜잭션 격리 수준이 약해도 됨** — `READ_COMMITTED`면 충분. 검색 직후 누가 마지막 객실을 채가도 정상 (예약 시점에서 다시 검증).
+
+### 잠재 리스크 (이 시퀀스에 한정)
+
+- **대량 결과 응답** — 도시에 Property 1000개, 각 5개 RoomType, 7박 검색이면 inventory row 35,000개를 application으로 가져오게 됨. → 단계별로 1차 필터 후 IN 좁히기, 또는 DB 차원 `EXISTS` 서브쿼리로 일자 필터링.
+- **검색 가격과 예약 가격의 갭** — 가격 변경 직후 검색한 사용자가 옛 가격으로 결과를 받음. B2 합의로 예약 시점에 스냅샷이 갱신되므로 청구는 안전하지만, "검색한 가격과 다르다"는 사용자 불만 가능성. UI/응답에 "검색 시점 기준 가격" 표기 권장.
+- **인덱스 의존성** — `daily_room_inventory(room_type_id, date)` 복합 인덱스가 필수. 없으면 풀스캔. ERD에 인덱스 명시 필요.
