@@ -6,8 +6,10 @@ import com.fasterxml.jackson.databind.exc.MismatchedInputException
 import com.loopers.support.error.CoreException
 import com.loopers.support.error.ErrorType
 import org.slf4j.LoggerFactory
+import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
+import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
@@ -102,6 +104,34 @@ class ApiControllerAdvice {
     @ExceptionHandler
     fun handleNotFound(e: NoResourceFoundException): ResponseEntity<ApiResponse<*>> {
         return failureResponse(errorType = ErrorType.NOT_FOUND)
+    }
+
+    @ExceptionHandler
+    fun handleValidation(e: MethodArgumentNotValidException): ResponseEntity<ApiResponse<*>> {
+        val errorMessage = e.bindingResult.fieldErrors.joinToString(", ") { fieldError ->
+            "${fieldError.field}: ${fieldError.defaultMessage}"
+        }
+        return failureResponse(errorType = ErrorType.BAD_REQUEST, errorMessage = errorMessage.ifBlank { null })
+    }
+
+    @ExceptionHandler
+    fun handleDataIntegrityViolation(e: DataIntegrityViolationException): ResponseEntity<ApiResponse<*>> {
+        log.warn("DataIntegrityViolationException : {}", e.message)
+        val combinedMessage = buildString {
+            append(e.message ?: "")
+            var cause: Throwable? = e.cause
+            while (cause != null) {
+                append(' ')
+                append(cause.message ?: "")
+                cause = cause.cause
+            }
+        }
+        val errorType = if (combinedMessage.contains("uk_users_login_id", ignoreCase = true)) {
+            ErrorType.DUPLICATE_LOGIN_ID
+        } else {
+            ErrorType.CONFLICT
+        }
+        return failureResponse(errorType = errorType)
     }
 
     @ExceptionHandler
