@@ -22,6 +22,26 @@
 - `affected rows == nights` 면 성공, 그 외에는 즉시 롤백 → `OutOfStock` 예외. 부분 차감 상태가 남지 않는다.
 - 트랜잭션 경계는 `InventoryService` 내부에서 시작·종료. `Reservation` 도메인은 결과만 받는다.
 
+## 도해 표기 가이드 (비개발자용)
+
+이 문서의 모든 시퀀스 다이어그램은 같은 표기 규칙을 따른다.
+
+| 표기 | 의미 |
+|------|------|
+| **수직 막대 (Lifeline)** | 객체가 활성화되어 일하고 있는 시간. 막대가 두꺼울수록 "그 객체가 책임지는 구간"이 길다. |
+| **`→` (실선 화살표)** | 동기 호출 (호출자가 응답을 기다림). |
+| **`⇢` (점선 화살표)** | 응답 / 반환. |
+| **`-)` (열린 화살표)** | 비동기 호출 (응답을 기다리지 않음 — 외부 리다이렉트, webhook 등). |
+| **`alt / else`** | 조건 분기. 위에서 아래로 한 경로만 실행됨. |
+| **`loop`** | 반복 실행. |
+| **`rect` 색상 블록** | **트랜잭션 경계**. 색상의 의미: 베이지 = 재고 차감, 초록 = 정상 확정, 빨강 = 보상(취소·복구), 파랑 = 읽기 전용. |
+| **`Note over`** | 다이어그램에 직접 그리기 어려운 설명을 부각. 트랜잭션·외부 시스템 경계 등. |
+
+비개발자라면 다음 두 가지만 따라 읽어도 흐름을 잡을 수 있다.
+
+1. **굵은 막대(Lifeline)가 어디서 시작해서 어디서 끝나는지** — 그 시간 동안 그 객체가 일하고 있다.
+2. **색상이 다른 `rect` 블록** — 같은 색은 같은 트랜잭션, 색이 바뀌면 별도 트랜잭션이다.
+
 ## 시퀀스 목록
 
 1. **예약 생성 + 결제** (PENDING → CONFIRMED / CANCELLED)
@@ -50,56 +70,71 @@ sequenceDiagram
   participant PG as PaymentService (외부)
   participant DB
 
-  Guest->>Ctrl: POST /api/v1/reservations<br/>{roomTypeId, checkIn, checkOut, guestCount}
-  Ctrl->>Svc: createReservation(...)
+  Guest->>+Ctrl: POST /api/v1/reservations<br/>{roomTypeId, checkIn, checkOut, guestCount}
+  Ctrl->>+Svc: createReservation(...)
 
   Svc->>Svc: 기간 유효성 검증<br/>(checkIn < checkOut, 미래 일자)
-  Svc->>DB: SELECT RoomType (maxOccupancy 검증)
-  DB-->>Svc: roomType
+  Svc->>+DB: SELECT RoomType (maxOccupancy 검증)
+  DB-->>-Svc: roomType
   alt maxOccupancy < guestCount
     Svc-->>Ctrl: 400 BAD_REQUEST
     Ctrl-->>Guest: 인원 초과
   end
 
-  Svc->>DB: SELECT DailyRoomRate<br/>WHERE room_type_id=? AND date IN (...)
-  DB-->>Svc: nightlyRates[]
+  Svc->>+DB: SELECT DailyRoomRate<br/>WHERE room_type_id=? AND date IN (...)
+  DB-->>-Svc: nightlyRates[]
   Svc->>Svc: totalAmount = sum(nightlyRates)<br/>(B2 스냅샷)
 
-  Svc->>Inv: reserve(roomTypeId, dates)
-  Note over Inv,DB: 단일 RDB 트랜잭션 시작
-  Inv->>DB: UPDATE daily_room_inventory<br/>SET remaining = remaining - 1<br/>WHERE room_type_id=? AND date IN (...)<br/>AND remaining > 0
-  DB-->>Inv: affected rows
+  Svc->>+Inv: reserve(roomTypeId, dates)
+  rect rgb(245, 245, 220)
+    Note over Inv,DB: 단일 RDB 트랜잭션 (BEGIN ─ COMMIT/ROLLBACK)
+    Inv->>+DB: UPDATE daily_room_inventory<br/>SET remaining = remaining - 1<br/>WHERE room_type_id=? AND date IN (...)<br/>AND remaining > 0
+    DB-->>-Inv: affected rows
 
-  alt affected rows < nights (재고 부족 / 동시성 충돌)
-    Inv->>DB: ROLLBACK
-    Inv-->>Svc: throw OutOfStock
-    Svc-->>Ctrl: 409 CONFLICT
-    Ctrl-->>Guest: 재고 부족 응답
-  else 모든 일자 차감 성공
-    Inv->>DB: COMMIT
-    Inv-->>Svc: ok
-    Svc->>DB: INSERT Reservation<br/>(status=PENDING,<br/> expiresAt=now+10min,<br/> totalAmount, nightlyBreakdown)
-    DB-->>Svc: reservationId
-    Svc-->>Ctrl: PENDING + 결제 페이지 URL
-    Ctrl-->>Guest: 302 → 결제 페이지
-
-    Guest->>PG: 결제 진행 (외부)
-    PG-->>Ctrl: webhook(reservationId, status)
-
-    alt 결제 성공
-      Ctrl->>Svc: confirm(reservationId)
-      Svc->>DB: UPDATE Reservation<br/>SET status=CONFIRMED
-      Svc-->>Ctrl: ok
-      Ctrl-->>Guest: 200 CONFIRMED
-    else 결제 실패 / 타임아웃
-      Ctrl->>Svc: fail(reservationId)
-      Svc->>Inv: release(roomTypeId, dates)
-      Inv->>DB: UPDATE daily_room_inventory<br/>SET remaining = remaining + 1<br/>WHERE room_type_id=? AND date IN (...)
-      Svc->>DB: UPDATE Reservation<br/>SET status=CANCELLED
-      Svc-->>Ctrl: ok
-      Ctrl-->>Guest: 결제 실패 응답
+    alt affected rows < nights (재고 부족 / 동시성 충돌)
+      Inv->>DB: ROLLBACK
+      Inv-->>-Svc: throw OutOfStock
+      Svc-->>-Ctrl: 409 CONFLICT
+      Ctrl-->>-Guest: 재고 부족 응답
+    else 모든 일자 차감 성공
+      Inv->>DB: COMMIT
+      Inv-->>-Svc: ok
+      Svc->>+DB: INSERT Reservation<br/>(status=PENDING,<br/> expiresAt=now+10min,<br/> totalAmount, nightlyBreakdown)
+      DB-->>-Svc: reservationId
+      Svc-->>Ctrl: PENDING + 결제 페이지 URL
+      Ctrl-->>Guest: 302 → 결제 페이지
     end
   end
+
+  Note over Guest,PG: ── 외부 결제 (트랜잭션 경계 밖, 비동기) ──
+  Guest-)PG: 결제 진행 (외부 redirect)
+  PG--)Ctrl: webhook(reservationId, status)
+  activate Ctrl
+
+  alt 결제 성공
+    Ctrl->>+Svc: confirm(reservationId)
+    rect rgb(220, 245, 220)
+      Note over Svc,DB: 단일 RDB 트랜잭션 — 상태 전이
+      Svc->>+DB: UPDATE Reservation<br/>SET status=CONFIRMED<br/>WHERE id=? AND status='PENDING'
+      DB-->>-Svc: affected rows
+    end
+    Svc-->>-Ctrl: ok
+    Ctrl-->>Guest: 200 CONFIRMED
+  else 결제 실패 / 타임아웃
+    Ctrl->>+Svc: fail(reservationId)
+    rect rgb(245, 220, 220)
+      Note over Svc,DB: 단일 RDB 트랜잭션 — 보상 (재고 복구 + 상태 전이)
+      Svc->>+Inv: release(roomTypeId, dates)
+      Inv->>+DB: UPDATE daily_room_inventory<br/>SET remaining = remaining + 1<br/>WHERE room_type_id=? AND date IN (...)
+      DB-->>-Inv: ok
+      Inv-->>-Svc: ok
+      Svc->>+DB: UPDATE Reservation<br/>SET status=CANCELLED,<br/> cancel_reason='PAYMENT_FAILED'
+      DB-->>-Svc: ok
+    end
+    Svc-->>-Ctrl: ok
+    Ctrl-->>Guest: 결제 실패 응답
+  end
+  deactivate Ctrl
 ```
 
 ### 이 구조에서 특히 봐야 할 포인트
@@ -138,36 +173,43 @@ sequenceDiagram
 
   Note over Sched,DB: ── 경로 A: 백그라운드 만료 정리 (1분 주기) ──
 
-  Sched->>Sched: 매 분 트리거
-  Sched->>DB: SELECT id, room_type_id, dates<br/>FROM reservations<br/>WHERE status='PENDING' AND expires_at < NOW()<br/>FOR UPDATE SKIP LOCKED LIMIT 100
-  DB-->>Sched: 만료 PENDING 목록
+  activate Sched
+  Sched->>Sched: cron 트리거 (매 1분)
+  Sched->>+DB: SELECT id, room_type_id, dates<br/>FROM reservations<br/>WHERE status='PENDING' AND expires_at < NOW()<br/>FOR UPDATE SKIP LOCKED LIMIT 100
+  DB-->>-Sched: 만료 PENDING 목록
 
   loop 각 만료 예약
-    Sched->>Svc: expire(reservationId)
-    Note over Svc,DB: 단일 RDB 트랜잭션
-    Svc->>DB: UPDATE Reservation<br/>SET status='CANCELLED', cancel_reason='EXPIRED'<br/>WHERE id=? AND status='PENDING'
-    DB-->>Svc: affected rows
-    alt affected rows = 1 (정상 전이)
-      Svc->>Inv: release(roomTypeId, dates)
-      Inv->>DB: UPDATE daily_room_inventory<br/>SET remaining = remaining + 1<br/>WHERE room_type_id=? AND date IN (...)
-      Svc->>DB: COMMIT
-    else affected rows = 0 (이미 CONFIRMED/CANCELLED로 전이됨)
-      Svc->>DB: ROLLBACK
-      Note right of Svc: 다른 트랜잭션이 먼저 처리 — 무시
+    Sched->>+Svc: expire(reservationId)
+    rect rgb(245, 220, 220)
+      Note over Svc,DB: 단일 RDB 트랜잭션 — 보상 (상태 전이 + 재고 복구)
+      Svc->>+DB: UPDATE Reservation<br/>SET status='CANCELLED', cancel_reason='EXPIRED'<br/>WHERE id=? AND status='PENDING'
+      DB-->>-Svc: affected rows
+      alt affected rows = 1 (정상 전이)
+        Svc->>+Inv: release(roomTypeId, dates)
+        Inv->>+DB: UPDATE daily_room_inventory<br/>SET remaining = remaining + 1<br/>WHERE room_type_id=? AND date IN (...)
+        DB-->>-Inv: ok
+        Inv-->>-Svc: ok
+        Svc->>DB: COMMIT
+      else affected rows = 0 (이미 CONFIRMED/CANCELLED로 전이됨)
+        Svc->>DB: ROLLBACK
+        Note right of Svc: 다른 트랜잭션이 먼저 처리 — 무시
+      end
     end
+    Svc-->>-Sched: ok
   end
+  deactivate Sched
 
   Note over Guest,DB: ── 경로 B: 사용자가 만료된 PENDING으로 결제 시도 ──
 
-  Guest->>Ctrl: 결제 페이지 진입 (오랜 시간 후)
-  Ctrl->>Svc: fetchReservation(id)
-  Svc->>DB: SELECT Reservation WHERE id=?
-  DB-->>Svc: reservation(status=PENDING, expires_at=과거)
+  Guest->>+Ctrl: 결제 페이지 진입 (오랜 시간 후)
+  Ctrl->>+Svc: fetchReservation(id)
+  Svc->>+DB: SELECT Reservation WHERE id=?
+  DB-->>-Svc: reservation(status=PENDING, expires_at=과거)
   alt expires_at < NOW() (만료됨)
-    Svc->>Svc: expire(reservationId)<br/>(경로 A와 동일 로직)
-    Note over Svc,Inv: 위와 같은 트랜잭션·정리 로직 재사용
-    Svc-->>Ctrl: EXPIRED
-    Ctrl-->>Guest: 410 GONE<br/>"예약이 만료되었습니다. 다시 예약해주세요."
+    Svc->>Svc: expire(reservationId)<br/>(경로 A와 동일 트랜잭션 로직 재사용)
+    Note over Svc,Inv: 위 rect 블록과 같은 트랜잭션 경계·정리 로직
+    Svc-->>-Ctrl: EXPIRED
+    Ctrl-->>-Guest: 410 GONE<br/>"예약이 만료되었습니다. 다시 예약해주세요."
   else 아직 유효
     Svc-->>Ctrl: PENDING (남은 시간)
     Ctrl-->>Guest: 결제 페이지 표시
@@ -207,33 +249,37 @@ sequenceDiagram
   participant Svc as PropertySearchService
   participant DB
 
-  Guest->>Ctrl: GET /api/v1/properties<br/>?city=&checkIn=&checkOut=&guestCount=
-  Ctrl->>Svc: search(criteria)
+  Guest->>+Ctrl: GET /api/v1/properties<br/>?city=&checkIn=&checkOut=&guestCount=
+  Ctrl->>+Svc: search(criteria)
   Svc->>Svc: 입력 검증<br/>(checkIn < checkOut, 미래 일자, guestCount >= 1)
 
-  Svc->>DB: SELECT Property<br/>WHERE city = ?
-  DB-->>Svc: properties[]
+  rect rgb(235, 245, 255)
+    Note over Svc,DB: 읽기 전용 (READ_COMMITTED) — 락 없음, 검색 결과는 "추정"
 
-  alt properties 비어있음
-    Svc-->>Ctrl: []
-    Ctrl-->>Guest: 200 OK (빈 결과)
-  else
-    Svc->>DB: SELECT RoomType<br/>WHERE property_id IN (...)<br/>AND max_occupancy >= ?  (P1)
-    DB-->>Svc: roomTypes[]
+    Svc->>+DB: SELECT Property<br/>WHERE city = ?
+    DB-->>-Svc: properties[]
 
-    Svc->>DB: SELECT (room_type_id, date, remaining)<br/>FROM daily_room_inventory<br/>WHERE room_type_id IN (...)<br/>AND date BETWEEN checkIn AND checkOut-1<br/>AND remaining > 0
-    DB-->>Svc: availableInventoryRows[]
+    alt properties 비어있음
+      Svc-->>Ctrl: []
+      Ctrl-->>Guest: 200 OK (빈 결과)
+    else
+      Svc->>+DB: SELECT RoomType<br/>WHERE property_id IN (...)<br/>AND max_occupancy >= ?  (P1)
+      DB-->>-Svc: roomTypes[]
 
-    Svc->>Svc: 일자별 가용 row 수 == nights 인 roomType만 필터<br/>(한 일자라도 빠지면 제외)
+      Svc->>+DB: SELECT (room_type_id, date, remaining)<br/>FROM daily_room_inventory<br/>WHERE room_type_id IN (...)<br/>AND date BETWEEN checkIn AND checkOut-1<br/>AND remaining > 0
+      DB-->>-Svc: availableInventoryRows[]
 
-    Svc->>DB: SELECT (room_type_id, date, amount)<br/>FROM daily_room_rate<br/>WHERE room_type_id IN (필터된 ids)<br/>AND date BETWEEN checkIn AND checkOut-1
-    DB-->>Svc: rateRows[]
+      Svc->>Svc: 일자별 가용 row 수 == nights 인 roomType만 필터<br/>(한 일자라도 빠지면 제외)
 
-    Svc->>Svc: roomType별 집계:<br/>totalAmount = sum(amount)<br/>avgNightlyPrice = totalAmount / nights  (P8)
+      Svc->>+DB: SELECT (room_type_id, date, amount)<br/>FROM daily_room_rate<br/>WHERE room_type_id IN (필터된 ids)<br/>AND date BETWEEN checkIn AND checkOut-1
+      DB-->>-Svc: rateRows[]
 
-    Svc-->>Ctrl: SearchResult[]<br/>{ propertyId, roomTypeId, nights,<br/>  totalAmount, avgNightlyPrice }
-    Ctrl-->>Guest: 200 OK + 결과 목록
+      Svc->>Svc: roomType별 집계:<br/>totalAmount = sum(amount)<br/>avgNightlyPrice = totalAmount / nights  (P8)
+    end
   end
+
+  Svc-->>-Ctrl: SearchResult[]<br/>{ propertyId, roomTypeId, nights,<br/>  totalAmount, avgNightlyPrice }
+  Ctrl-->>-Guest: 200 OK + 결과 목록
 ```
 
 ### 이 구조에서 특히 봐야 할 포인트
@@ -271,11 +317,11 @@ sequenceDiagram
   participant Bus as DomainEventBus
   participant DB
 
-  Guest->>Ctrl: POST /api/v1/reservations/{id}/cancel
-  Ctrl->>Svc: cancel(reservationId, guestId)
+  Guest->>+Ctrl: POST /api/v1/reservations/{id}/cancel
+  Ctrl->>+Svc: cancel(reservationId, guestId)
 
-  Svc->>DB: SELECT Reservation WHERE id=?
-  DB-->>Svc: reservation
+  Svc->>+DB: SELECT Reservation WHERE id=?
+  DB-->>-Svc: reservation
 
   alt reservation.guestId != guestId
     Svc-->>Ctrl: 403 FORBIDDEN
@@ -285,25 +331,34 @@ sequenceDiagram
     Svc-->>Ctrl: 409 CONFLICT (취소 불가 상태)
     Ctrl-->>Guest: 상태 안내
   else 취소 가능
-    Note over Svc,DB: 단일 RDB 트랜잭션
-    Svc->>DB: UPDATE Reservation<br/>SET status='CANCELLED',<br/> cancel_reason='USER_REQUEST',<br/> canceled_at=NOW()<br/>WHERE id=? AND status IN ('PENDING','CONFIRMED')
-    DB-->>Svc: affected rows
+    rect rgb(245, 220, 220)
+      Note over Svc,DB: 단일 RDB 트랜잭션 — 보상 (상태 전이 + 재고 복구 + outbox INSERT)
 
-    alt affected rows = 0 (만료 스케줄러 등이 먼저 전이)
-      Svc->>DB: ROLLBACK
-      Svc-->>Ctrl: 409 CONFLICT
-      Ctrl-->>Guest: 다시 시도 안내
-    else affected rows = 1
-      Svc->>Inv: release(roomTypeId, dates)
-      Inv->>DB: UPDATE daily_room_inventory<br/>SET remaining = remaining + 1<br/>WHERE room_type_id=? AND date IN (...)
-      Svc->>DB: COMMIT
+      Svc->>+DB: UPDATE Reservation<br/>SET status='CANCELLED',<br/> cancel_reason='USER_REQUEST',<br/> canceled_at=NOW()<br/>WHERE id=? AND status IN ('PENDING','CONFIRMED')
+      DB-->>-Svc: affected rows
 
-      Note over Svc,Bus: 환불 산정·실행은 후속 라운드.<br/>이번 라운드는 이벤트 발행까지만.
-      Svc->>Bus: publish ReservationCanceledEvent<br/>{reservationId, cancelReason, totalAmount,<br/> canceledAt, originalStatus}
+      alt affected rows = 0 (만료 스케줄러 등이 먼저 전이)
+        Svc->>DB: ROLLBACK
+        Svc-->>Ctrl: 409 CONFLICT
+        Ctrl-->>Guest: 다시 시도 안내
+      else affected rows = 1
+        Svc->>+Inv: release(roomTypeId, dates)
+        Inv->>+DB: UPDATE daily_room_inventory<br/>SET remaining = remaining + 1<br/>WHERE room_type_id=? AND date IN (...)
+        DB-->>-Inv: ok
+        Inv-->>-Svc: ok
 
-      Svc-->>Ctrl: ok
-      Ctrl-->>Guest: 200 OK + 취소 확인
+        Note over Svc,Bus: outbox INSERT (트랜잭션 안)<br/>실제 발행은 별도 워커가 후처리
+        Svc->>+DB: INSERT outbox<br/>{event_type='ReservationCanceledEvent',<br/> payload={reservationId, cancelReason, totalAmount, ...}}
+        DB-->>-Svc: ok
+        Svc->>DB: COMMIT
+      end
     end
+
+    Note over Svc,Bus: ── 트랜잭션 커밋 이후 (별도 워커, 비동기) ──
+    Bus--)Bus: outbox 워커가 ReservationCanceledEvent 송출
+
+    Svc-->>-Ctrl: ok
+    Ctrl-->>-Guest: 200 OK + 취소 확인
   end
 ```
 
