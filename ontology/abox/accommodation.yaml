@@ -1,0 +1,252 @@
+# A-Box: accommodation 도메인
+# 숙박 커머스의 핵심 비즈니스 개념과 관계를 정의한다.
+# 코드 위치는 entity.repo + package로 명시 (Round 3 구현 시점까지는 planned 상태).
+
+domain:
+  id: accommodation
+  name: 숙박 커머스
+  summary: 숙소·객실 타입·일자별 재고/요금·찜·예약을 다루는 도메인. Round 2에서 설계 확정, Round 3+에서 구현 예정.
+  wiki_root: wiki/accommodation/
+
+# ══════════════════════════════════════
+# Entities
+# ══════════════════════════════════════
+
+entities:
+  # ─── Data ───
+  - id: property
+    name: Property (숙소)
+    type: data
+    summary: 호텔·펜션·모텔·리조트 단위의 판매 단위. 한 Property는 N개 RoomType을 소유한다. 호스트가 등록·관리한다.
+    wiki_doc: wiki/accommodation/glossary.md#property
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/property
+    status: planned
+
+  - id: room-type
+    name: RoomType (객실 타입)
+    type: data
+    summary: 한 Property가 판매하는 객실 카테고리(스탠다드 더블, 디럭스 트윈 등). 최대 수용 인원·침대 타입을 보유. 1 Property : N RoomType.
+    wiki_doc: wiki/accommodation/glossary.md#roomtype
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/roomtype
+    status: planned
+
+  - id: daily-room-inventory
+    name: DailyRoomInventory (일자별 재고)
+    type: data
+    summary: 특정 (room_type_id, date) 단위의 잔여 객실 수량. 복합 PK + atomic UPDATE로 더블부킹을 구조적으로 차단한다.
+    wiki_doc: wiki/accommodation/glossary.md#daily-room-inventory
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/inventory
+    status: planned
+
+  - id: daily-room-rate
+    name: DailyRoomRate (일자별 요금)
+    type: data
+    summary: 특정 (room_type_id, date)의 1박 요금. 검색 시 합산해 totalAmount/avgNightlyPrice를 계산하고, PENDING 생성 시점에 reservation_nightly로 스냅샷된다.
+    wiki_doc: wiki/accommodation/glossary.md#daily-room-rate
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/rate
+    status: planned
+
+  - id: reservation
+    name: Reservation (예약)
+    type: data
+    summary: 게스트의 객실 점유 계약. PENDING → CONFIRMED → CHECKED_IN → CHECKED_OUT 또는 CANCELLED/NO_SHOW 상태 머신을 보유. PENDING 생성 시점의 가격 스냅샷·만료 시각·취소 사유를 함께 관리한다.
+    wiki_doc: wiki/accommodation/glossary.md#reservation
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/reservation
+    status: planned
+
+  - id: reservation-nightly
+    name: ReservationNightly (예약 일자별 스냅샷)
+    type: data
+    summary: Reservation 1건이 점유한 N일을 일자·금액 row로 분해한 가격 스냅샷. 후속 라운드의 환불 산정 기반.
+    wiki_doc: wiki/accommodation/glossary.md#reservation-nightly
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/reservation
+    status: planned
+
+  - id: wishlist
+    name: Wishlist (찜)
+    type: data
+    summary: 게스트가 Property를 즐겨찾기한 기록. (guest_id, property_id) UNIQUE.
+    wiki_doc: wiki/accommodation/glossary.md#wishlist
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/wishlist
+    status: planned
+
+  # ─── Process ───
+  - id: property-search
+    name: PropertySearchService
+    type: process
+    summary: 도시·체크인·체크아웃·인원수로 가용 객실을 조회하고 totalAmount·avgNightlyPrice를 합산한다. 4단 IN-절 조회로 N+1 회피.
+    wiki_doc: wiki/accommodation/design-decisions.md#search
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/application/accommodation/search
+    status: planned
+
+  - id: reservation-service
+    name: ReservationService
+    type: process
+    summary: 예약 생성·확정·취소·만료를 다루는 application 서비스. Reservation aggregate의 상태 전이를 호출하고 InventoryService에 재고 차감/복구를 위임한다.
+    wiki_doc: wiki/accommodation/design-decisions.md#reservation-flow
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/application/accommodation/reservation
+    status: planned
+
+  - id: inventory-service
+    name: InventoryService
+    type: process
+    summary: 일자별 재고 차감·복구 단독 책임. 단일 RDB 트랜잭션 + atomic UPDATE로 동시성 보장. Reservation 도메인은 직접 inventory를 만지지 않는다.
+    wiki_doc: wiki/accommodation/design-decisions.md#inventory-atomic
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/inventory
+    status: planned
+
+  - id: expiration-scheduler
+    name: ExpirationScheduler
+    type: process
+    summary: 1분 주기로 만료된 PENDING 예약을 스캔(FOR UPDATE SKIP LOCKED)하여 cancel + release를 실행. 사용자 결제 재진입 시점도 같은 expire 함수를 호출.
+    wiki_doc: wiki/accommodation/design-decisions.md#pending-expiration
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/application/accommodation/scheduler
+    status: planned
+
+  # ─── External ───
+  - id: payment-gateway
+    name: PaymentGateway (외부 PG)
+    type: external
+    summary: 외부 결제 시스템. 예약 PENDING 생성 후 비동기로 호출되며 webhook으로 성공/실패를 통지한다. 트랜잭션 경계 밖.
+
+# ══════════════════════════════════════
+# Relations
+# ══════════════════════════════════════
+
+relations:
+  # ─── 구조 (소유·일부) ───
+  - from: property
+    to: room-type
+    type: owns
+    note: 1 Property : N RoomType. property_id FK
+  - from: room-type
+    to: daily-room-inventory
+    type: owns
+    note: 1 RoomType : N DailyRoomInventory (date별). 복합 PK (room_type_id, date)
+  - from: room-type
+    to: daily-room-rate
+    type: owns
+    note: 1 RoomType : N DailyRoomRate (date별). 복합 PK (room_type_id, date)
+  - from: reservation
+    to: reservation-nightly
+    type: owns
+    note: Reservation 1건당 N개 ReservationNightly (체크인~체크아웃-1 일자별 스냅샷)
+
+  # ─── 참조 (소유·의존 없는 단방향) ───
+  - from: reservation
+    to: room-type
+    type: references
+    note: room_type_id FK. 점유 대상이지만 RoomType이 Reservation을 소유하지는 않음
+  - from: wishlist
+    to: property
+    type: references
+    note: property_id FK + (guest_id, property_id) UNIQUE
+
+  # ─── 검색 협력 ───
+  - from: property-search
+    to: property
+    type: consumes
+    note: city 필터로 1차 조회
+  - from: property-search
+    to: room-type
+    type: consumes
+    note: maxOccupancy >= guestCount 필터
+  - from: property-search
+    to: daily-room-inventory
+    type: consumes
+    note: remaining > 0 이고 일자수 일치한 RoomType만 남김
+  - from: property-search
+    to: daily-room-rate
+    type: consumes
+    note: 합산해 totalAmount, avgNightlyPrice 계산 (B2 스냅샷 이전이므로 추정)
+
+  # ─── 예약 흐름 ───
+  - from: reservation-service
+    to: reservation
+    type: owns
+    note: Reservation aggregate의 라이프사이클 관리 (생성·상태 전이)
+  - from: reservation-service
+    to: inventory-service
+    type: depends_on
+    note: 재고 차감·복구를 위임 (B1 합의)
+  - from: reservation-service
+    to: payment-gateway
+    type: references
+    note: 비동기 외부 호출. webhook으로 confirm/fail 콜백 수신
+  - from: inventory-service
+    to: daily-room-inventory
+    type: owns
+    note: atomic UPDATE로 remaining 차감·복구
+
+  # ─── 만료·취소 흐름 ───
+  - from: expiration-scheduler
+    to: reservation-service
+    type: triggers
+    note: 만료 PENDING 발견 시 expire(id) 호출
+  - from: reservation-service
+    to: reservation
+    type: triggers
+    note: state machine 전이 (PENDING→CONFIRMED/CANCELLED, CONFIRMED→NO_SHOW/CHECKED_IN, ...)
+
+  # ─── 배포 ───
+  - from: property-search
+    to: mysql
+    type: deployed_in
+  - from: reservation-service
+    to: mysql
+    type: deployed_in
+  - from: inventory-service
+    to: mysql
+    type: deployed_in
+  - from: expiration-scheduler
+    to: mysql
+    type: deployed_in
+  - from: reservation
+    to: mysql
+    type: deployed_in
+  - from: daily-room-inventory
+    to: mysql
+    type: deployed_in
+  - from: daily-room-rate
+    to: mysql
+    type: deployed_in
+
+# ══════════════════════════════════════
+# Notes
+# ══════════════════════════════════════
+
+notes:
+  - id: round
+    body: |
+      Round 2에서 설계 확정 단계. 모든 entity의 status는 `planned`.
+      Round 3+ 구현 시점에 status를 `active`로 전이하고 package 경로 실재 여부를 검증한다.
+
+  - id: state-machine
+    body: |
+      Reservation 상태 머신은 `wiki/accommodation/design-decisions.md#state-machine`과
+      `docs/design/01-requirements.md § 5`에 동일하게 명시되어 있다.
+
+  - id: extensions
+    body: |
+      이번 라운드 범위 외:
+      - 다중 객실 예약(E1), 가변 가격(E2), 멤버십 등급별 가격(E3), 단체 예약(E4)
+      - 위약금·환불 산정 (P5 합의: 트리거·상태만, 정산은 후속)
+      - RoomInstance(특정 호실) 식별 (B4 합의: 이번 라운드 제외)
+
+  - id: future-domains
+    body: |
+      후속 추가 검토 도메인:
+      - cancellation-policy (취소·환불 정책)
+      - refund-service (외부 PG 환불 호출·정산)
+      - host-management (호스트 운영자 콘솔)
