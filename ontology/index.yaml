@@ -1,0 +1,17 @@
+# Ontology Index
+# 도메인 목록과 비즈니스 위계. 이 파일이 탐색의 진입점.
+# Claude는 매 요청 시 이 파일을 먼저 읽고, 관련 도메인 파일로 이동한다.
+
+domains:
+  - id: accommodation
+    path: 숙박/예약
+    file: abox/accommodation.yaml
+    summary: 숙소·객실 타입·일자별 재고/요금·찜·예약을 다루는 숙박 커머스 도메인
+    repos:
+      - e-commerce-BE
+    infra:
+      - mysql
+      - redis
+
+cross_domain: abox/cross-domain.yaml
+shared_infra: abox/infra.yaml
