@@ -5,7 +5,7 @@
 domain:
   id: accommodation
   name: 숙박 커머스
-  summary: 숙소·객실 타입·일자별 재고/요금·찜·예약을 다루는 도메인. Round 2에서 설계 확정, Round 3+에서 구현 예정.
+  summary: 숙소·객실 타입·일자별 재고/요금·찜·예약을 다루는 도메인. Round 2 설계 확정, Round 3에서 예약 생성 핵심 슬라이스(Reservation·재고 차감·가격 스냅샷) 구현. 나머지(검색·취소·만료·찜·Property/RoomType)는 후속.
   wiki_root: wiki/accommodation/
 
 # ══════════════════════════════════════
@@ -38,8 +38,8 @@ entities:
     summary: 특정 (room_type_id, date) 단위의 잔여 객실 수량. 복합 PK + atomic UPDATE로 더블부킹을 구조적으로 차단한다.
     wiki_doc: wiki/accommodation/glossary.md#daily-room-inventory
     repo: e-commerce-BE
-    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/inventory
-    status: planned
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation
+    status: active
 
   - id: daily-room-rate
     name: DailyRoomRate (일자별 요금)
@@ -47,8 +47,8 @@ entities:
     summary: 특정 (room_type_id, date)의 1박 요금. 검색 시 합산해 totalAmount/avgNightlyPrice를 계산하고, PENDING 생성 시점에 reservation_nightly로 스냅샷된다.
     wiki_doc: wiki/accommodation/glossary.md#daily-room-rate
     repo: e-commerce-BE
-    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/rate
-    status: planned
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation
+    status: active
 
   - id: reservation
     name: Reservation (예약)
@@ -56,8 +56,8 @@ entities:
     summary: 게스트의 객실 점유 계약. PENDING → CONFIRMED → CHECKED_IN → CHECKED_OUT 또는 CANCELLED/NO_SHOW 상태 머신을 보유. PENDING 생성 시점의 가격 스냅샷·만료 시각·취소 사유를 함께 관리한다.
     wiki_doc: wiki/accommodation/glossary.md#reservation
     repo: e-commerce-BE
-    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/reservation
-    status: planned
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation
+    status: active
 
   - id: reservation-nightly
     name: ReservationNightly (예약 일자별 스냅샷)
@@ -65,8 +65,8 @@ entities:
     summary: Reservation 1건이 점유한 N일을 일자·금액 row로 분해한 가격 스냅샷. 후속 라운드의 환불 산정 기반.
     wiki_doc: wiki/accommodation/glossary.md#reservation-nightly
     repo: e-commerce-BE
-    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/reservation
-    status: planned
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation
+    status: active
 
   - id: wishlist
     name: Wishlist (찜)
@@ -90,20 +90,20 @@ entities:
   - id: reservation-service
     name: ReservationService
     type: process
-    summary: 예약 생성·확정·취소·만료를 다루는 application 서비스. Reservation aggregate의 상태 전이를 호출하고 InventoryService에 재고 차감/복구를 위임한다.
+    summary: 예약 생성·확정·취소·만료를 다루는 도메인 서비스. Reservation aggregate의 상태 전이를 호출하고 InventoryService에 재고 차감/복구를 위임한다. (Round 3 슬라이스: create 만 구현, 확정·취소·만료는 후속.)
     wiki_doc: wiki/accommodation/design-decisions.md#reservation-flow
     repo: e-commerce-BE
-    package: apps/commerce-api/src/main/kotlin/com/loopers/application/accommodation/reservation
-    status: planned
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation
+    status: active
 
   - id: inventory-service
     name: InventoryService
     type: process
-    summary: 일자별 재고 차감·복구 단독 책임. 단일 RDB 트랜잭션 + atomic UPDATE로 동시성 보장. Reservation 도메인은 직접 inventory를 만지지 않는다.
+    summary: 일자별 재고 차감·복구 단독 책임. 단일 RDB 트랜잭션 + atomic UPDATE(WHERE remaining > 0)로 동시성 보장. Reservation 도메인은 직접 inventory를 만지지 않는다. (Round 3 슬라이스: reserve 만 구현, release 는 취소 슬라이스에서.)
     wiki_doc: wiki/accommodation/design-decisions.md#inventory-atomic
     repo: e-commerce-BE
-    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/inventory
-    status: planned
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation
+    status: active
 
   - id: expiration-scheduler
     name: ExpirationScheduler
@@ -133,11 +133,11 @@ relations:
   - from: room-type
     to: daily-room-inventory
     type: owns
-    note: 1 RoomType : N DailyRoomInventory (date별). 복합 PK (room_type_id, date)
+    note: 1 RoomType : N DailyRoomInventory (date별). UNIQUE(room_type_id, date) — 설계는 복합 PK
   - from: room-type
     to: daily-room-rate
     type: owns
-    note: 1 RoomType : N DailyRoomRate (date별). 복합 PK (room_type_id, date)
+    note: 1 RoomType : N DailyRoomRate (date별). UNIQUE(room_type_id, date) — 설계는 복합 PK
   - from: reservation
     to: reservation-nightly
     type: owns
@@ -229,8 +229,12 @@ relations:
 notes:
   - id: round
     body: |
-      Round 2에서 설계 확정 단계. 모든 entity의 status는 `planned`.
-      Round 3+ 구현 시점에 status를 `active`로 전이하고 package 경로 실재 여부를 검증한다.
+      Round 2: 설계 확정. Round 3: 예약 생성 핵심 슬라이스 구현 —
+      reservation, reservation-nightly, daily-room-inventory, daily-room-rate,
+      reservation-service(create 만), inventory-service(reserve 만)가 `active`.
+      구현은 BaseEntity 컨벤션(surrogate Long PK)을 따르므로, 설계의 복합 PK 는 UNIQUE 제약으로 동일 보장한다.
+      나머지(property, room-type, wishlist, property-search, expiration-scheduler)는 `planned`.
+      모든 active entity 코드는 apps/commerce-api/.../domain/accommodation 패키지에 flat 배치.
 
   - id: state-machine
     body: |
