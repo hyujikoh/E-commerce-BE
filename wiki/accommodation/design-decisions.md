@@ -152,3 +152,42 @@ UPDATE daily_room_inventory
 | 단체 예약 (E4) | 1 예약 = 1 RoomType + 1 인원수 | 별도 도메인 검토 |
 | 특정 호실 식별 (B4) | (room_type_id, date) 수량 관리로 충분 | 호실 단위 식별 요구 발생 시 RoomInstance 도입 |
 | 위약금·환불 산정 (P5) | 이벤트 발행까지만, 산정 로직은 후속 | cancellation-policy + refund-service 도메인 |
+
+---
+
+## transaction-lock — 쿠폰·재고·찜 트랜잭션 경계와 락 전략 (Round 4)
+
+**결정**: 예약 생성은 단일 `@Transactional` 경계 안에서 **쿠폰 사용 → 재고 차감 → 예약 생성** 순으로 처리하고, 각 동시성 구간은 **도메인별 최적의 원자적 조건부 UPDATE**로 제어한다. 비관적/분산 락은 도입하지 않는다.
+
+```
+ReservationService.create()  ── 단일 트랜잭션 ──
+  ├─ 1) 요금 스냅샷 조회 (DailyRoomRate 합산 → 원금)
+  ├─ 2) 쿠폰 사용 처리  couponService.use()   // 할인 계산 → AVAILABLE→USED 조건부 UPDATE
+  ├─ 3) 일자별 재고 차감 inventoryService.reserve()  // 날짜 오름차순 atomic UPDATE
+  └─ 4) 예약 PENDING 생성 + ReservationNightly 스냅샷(원금/할인/최종)
+  ※ 어느 단계든 실패하면 전체 롤백 (다일자 부분 성공 금지)
+```
+
+**도메인별 락 전략 (낙관적 성격의 조건부 UPDATE)**:
+
+| 구간 | 동시성 위험 | 제어 방식 |
+|------|-------------|-----------|
+| 쿠폰 발급 | 같은 템플릿 중복 발급 | `UNIQUE(user_id, coupon_id)` + `DataIntegrityViolation → COUPON_ALREADY_ISSUED` 변환 |
+| 쿠폰 사용 | 동일 쿠폰 동시 예약 | `UPDATE ... SET status='USED' WHERE id=? AND status='AVAILABLE'` (affected=0 → 실패) |
+| 일자별 재고 | 더블부킹 | `UPDATE ... SET remaining=remaining-1 WHERE remaining>0` (affected≠nights → 롤백) |
+| 찜 수 | 동시 찜/찜취소 Lost Update | `UPDATE ... SET count=count±1` 원자적 카운터 + read-your-writes |
+
+**왜**:
+- 단일 RDB로 충분한 트래픽 가정 → 별도 락 인프라(Redis 분산 락) 불필요. 조건부 UPDATE의 affected rows가 동시성 충돌을 자연 검출.
+- 락 보유 시간을 최소화(조건부 UPDATE는 행 단위 짧은 락)하여 비관적 락 대비 동시 처리량 유지.
+- 쿠폰을 재고보다 **먼저** 처리 → 더 비싼 다일자 재고 락을 늦게 잡아 보유 구간 단축.
+
+**데드락 회피 — 다일자 재고 락 순서**:
+- 체크인~체크아웃의 여러 재고 row를 차감할 때 **항상 날짜 오름차순**으로 락을 획득한다(`DateRange.datesExclusive()` 오름차순 보장).
+- 두 예약이 겹치는 일자 집합을 동시에 차감해도 락 획득 순서가 동일하므로 순환 대기(데드락)가 발생하지 않는다.
+
+**대안**:
+- 비관적 락(`SELECT ... FOR UPDATE`) → 트랜잭션 길어져 동시성 ↓.
+- 분산 락(Redis) → 인프라·장애 시나리오 복잡. 다중 인스턴스 RDB 진입 시 재검토.
+
+**리스크**: 결제(PG) 미연동 라운드이므로 쿠폰은 PENDING 생성 시점에 즉시 `USED`로 소비된다. 결제 실패/만료로 예약이 CANCELLED되면 쿠폰 복구(USED→AVAILABLE)가 필요 — 자동 복구는 후속(취소·만료 슬라이스).

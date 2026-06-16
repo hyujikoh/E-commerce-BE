@@ -42,7 +42,8 @@ docs/design/
 ontology 등록:
 
 ```
-ontology/abox/accommodation.yaml  ← 12 entities + 23 relations
+ontology/abox/accommodation.yaml  ← 14 entities + 29 relations (Round 4: 찜 entity 갱신)
+ontology/abox/coupon.yaml          ← 쿠폰 도메인 (Round 4 신규, 예약과 cross-domain 연결)
 ```
 
 ## 1주차 commerce-user 도메인과의 통합

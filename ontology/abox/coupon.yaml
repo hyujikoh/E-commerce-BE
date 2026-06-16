@@ -1,0 +1,97 @@
+# A-Box: coupon 도메인
+# 정액/정률 쿠폰의 발급·사용·관리. 예약 결제 시 할인 적용 (Round 4 구현).
+
+domain:
+  id: coupon
+  name: 쿠폰
+  summary: 정액(FIXED)/정률(RATE) 쿠폰의 발급·사용·관리. 재사용 불가하며 예약 1건당 1장 적용. Round 4 구현. 예약(accommodation) 흐름이 사용 처리를 호출(cross-domain 참조).
+  # 전용 wiki는 후속 분리 후보. 현재는 accommodation glossary/design-decisions를 공유 참조한다.
+  wiki_root: wiki/accommodation/
+
+# ══════════════════════════════════════
+# Entities
+# ══════════════════════════════════════
+
+entities:
+  # ─── Data ───
+  - id: coupon
+    name: Coupon (쿠폰 템플릿)
+    type: data
+    summary: 발급 가능한 쿠폰의 정의. type(FIXED/RATE)·value·minOrderAmount(선택)·expiredAt 보유. admin이 등록·수정·삭제하고 발급내역을 조회한다.
+    wiki_doc: wiki/accommodation/glossary.md#coupon
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/coupon
+    status: active
+
+  - id: issued-coupon
+    name: IssuedCoupon (발급 쿠폰)
+    type: data
+    summary: 사용자가 발급받아 소유한 쿠폰 1장. status(AVAILABLE/USED/EXPIRED) + (user_id, coupon_id) UNIQUE. 사용은 AVAILABLE 상태 조건부 UPDATE로 1회만 성공.
+    wiki_doc: wiki/accommodation/glossary.md#issued-coupon
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/coupon
+    status: active
+
+  # ─── Process ───
+  - id: coupon-service
+    name: CouponService
+    type: process
+    summary: 쿠폰 발급(중복 방지)·사용(소유/상태/만료 검증 후 USED 전이)·내 쿠폰 조회·admin 템플릿 CRUD/발급내역을 담당한다. 발급은 UNIQUE 위반→COUPON_ALREADY_ISSUED, 사용은 조건부 UPDATE로 동시성 제어.
+    wiki_doc: wiki/accommodation/design-decisions.md#transaction-lock
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/coupon
+    status: active
+
+# ══════════════════════════════════════
+# Relations
+# ══════════════════════════════════════
+
+relations:
+  # ─── 참조 ───
+  - from: issued-coupon
+    to: coupon
+    type: references
+    note: coupon_id FK. 발급 쿠폰은 템플릿을 참조 (할인 계산 시 type/value 조회)
+
+  # ─── 서비스 흐름 ───
+  - from: coupon-service
+    to: coupon
+    type: owns
+    note: 템플릿 라이프사이클 관리 (admin CRUD)
+  - from: coupon-service
+    to: issued-coupon
+    type: owns
+    note: 발급·사용 상태 전이 (AVAILABLE→USED), 조건부 UPDATE로 동시성 제어
+
+  # ─── 배포 ───
+  - from: coupon
+    to: mysql
+    type: deployed_in
+  - from: issued-coupon
+    to: mysql
+    type: deployed_in
+  - from: coupon-service
+    to: mysql
+    type: deployed_in
+
+# ══════════════════════════════════════
+# Notes
+# ══════════════════════════════════════
+
+notes:
+  - id: layers
+    body: |
+      코드 모듈은 entity로 만들지 않는다(ontology-rules). coupon-service는 도메인 서비스
+      (domain/coupon/CouponService.kt)를 가리키며, 대고객 API(interfaces/api/coupon),
+      admin API(interfaces/api/.../admin), application facade는 코드에서 직접 확인한다.
+      read model(OwnedCoupon, PageResult)은 조회 응답용 보조 타입.
+
+  - id: cross-domain
+    body: |
+      예약(accommodation/reservation-service)이 예약 생성 시 coupon-service.use 를 단일
+      트랜잭션에서 호출한다. 관계 정의는 abox/cross-domain.yaml 참조.
+
+  - id: payment
+    body: |
+      결제(PG) 미연동 라운드이므로 쿠폰은 예약 PENDING 생성 시점에 즉시 USED 로 소비된다.
+      예약 취소/만료 시 쿠폰 복구(USED→AVAILABLE)는 후속(취소·만료 슬라이스).

@@ -13,5 +13,14 @@ domains:
       - mysql
       - redis
 
+  - id: coupon
+    path: 숙박/쿠폰
+    file: abox/coupon.yaml
+    summary: 정액/정률 쿠폰의 발급·사용·관리. 예약 결제 시 할인 적용 (Round 4)
+    repos:
+      - e-commerce-BE
+    infra:
+      - mysql
+
 cross_domain: abox/cross-domain.yaml
 shared_infra: abox/infra.yaml
