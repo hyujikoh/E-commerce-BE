@@ -12,6 +12,7 @@ management:
         include:
           - health
           - prometheus
+          - jvm
   endpoint:
     health:
       probes:
