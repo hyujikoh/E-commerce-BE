@@ -88,7 +88,7 @@ TO-BE 웜 128ms의 내역: p+rt 접근 ~8ms, **dr 인덱스 룩업 5,000회 ≈ 
 
 전략 상세와 "왜"는 `wiki/accommodation/design-decisions.md#search-cache`. 요약:
 
-- cache-aside — 검색 페이지 TTL 60초, 상세 기본 정보 TTL 10분. 찜 수는 캐시하지 않고 매 조회 병합.
+- cache-aside — 검색 페이지 TTL 60초(± 10초 지터, 동시 만료 스탬피드 분산 — `round5-load-test.md` § 5), 상세 기본 정보 TTL 10분. 찜 수는 캐시하지 않고 매 조회 병합.
 - **일자별 재고·요금 원본은 캐시하지 않는다.** 검색 결과가 낡아도 예약 생성의 원자적 조건부 UPDATE가 DB 재고를 재확인하므로 초과 판매는 불가능하다.
 - 캐시(Redis) 장애 시 warn 로그 + DB 폴백으로 정상 동작. 동작 검증: `PropertyFacadeCacheIntegrationTest`.
 

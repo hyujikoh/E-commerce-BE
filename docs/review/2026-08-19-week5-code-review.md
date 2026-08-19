@@ -75,7 +75,7 @@ Major 2건 모두 기능 정확성 문제가 아니라 캐시 미스 경로의 �
 
 ## 후속 작업 후보
 
-- [ ] M1: `SEARCH_TTL` 지터 적용 → `docs/perf/load/search-load.js`로 부하 테스트 재측정
+- [x] M1: `SEARCH_TTL` 지터 적용 → 부하 테스트 재측정 완료. **지터 단독으로는 부족** — 개별 키의 만료 herd만으로 풀 고갈이 재현됐다(`round5-load-test.md` § 5). stale-while-revalidate 또는 single-flight가 후속 필요.
 - [ ] M2: `COUNT(*) OVER()` 단일 쿼리 전환 검토 → `round5-search-optimization.md` 수치 갱신
 - [ ] m1: `design-decisions.md#search-cache` 찜 수 서술에 한정어 추가
 - [ ] m2: coupon 3개 파일 import 블록 정리

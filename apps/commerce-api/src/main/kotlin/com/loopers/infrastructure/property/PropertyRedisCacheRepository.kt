@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.data.redis.core.RedisTemplate
 import org.springframework.stereotype.Component
 import java.time.Duration
+import java.util.concurrent.ThreadLocalRandom
 
 /**
  * Redis cache-aside 구현. 읽기는 replica-preferred 템플릿, 쓰기는 master 템플릿을 사용한다.
@@ -40,7 +41,10 @@ class PropertyRedisCacheRepository(
         read(searchKey(condition), PropertyInfo.SearchPage::class.java)
 
     override fun saveSearchPage(condition: PropertySearchCondition, page: PropertyInfo.SearchPage) {
-        write(searchKey(condition), page, SEARCH_TTL)
+        // 같은 시점에 적재된 검색 키들이 동시에 만료되어 DB로 몰리는 것(캐시 스탬피드)을 지터로 분산한다.
+        val jitterSeconds = SEARCH_TTL_JITTER.seconds
+        val jitter = ThreadLocalRandom.current().nextLong(-jitterSeconds, jitterSeconds + 1)
+        write(searchKey(condition), page, SEARCH_TTL.plusSeconds(jitter))
     }
 
     private fun <T> read(key: String, type: Class<T>): T? = runCatching {
@@ -69,7 +73,10 @@ class PropertyRedisCacheRepository(
         /** 상세 기본 정보 — 이름·객실 구성은 저빈도 변경이라 10분. */
         private val DETAIL_TTL = Duration.ofMinutes(10)
 
-        /** 검색 페이지 — 재고·찜 변동 반영 지연 상한 60초. */
+        /** 검색 페이지 — 재고·찜 변동 반영 지연 상한 60초(지터 포함 최대 70초). */
         private val SEARCH_TTL = Duration.ofSeconds(60)
+
+        /** 동시 만료 스탬피드 방지 지터 폭 — 저장 시 TTL을 60초 ± 10초로 분산한다. */
+        private val SEARCH_TTL_JITTER = Duration.ofSeconds(10)
     }
 }
