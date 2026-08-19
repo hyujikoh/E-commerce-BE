@@ -3,7 +3,7 @@ package com.loopers.infrastructure.coupon
 import com.loopers.domain.coupon.IssuedCoupon
 import com.loopers.domain.coupon.IssuedCouponRepository
 import com.loopers.domain.coupon.IssuedCouponStatus
-import com.loopers.domain.coupon.PageResult
+import com.loopers.domain.common.PageResult
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.data.repository.findByIdOrNull

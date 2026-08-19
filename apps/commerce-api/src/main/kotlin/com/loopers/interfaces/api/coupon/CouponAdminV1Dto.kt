@@ -2,7 +2,7 @@ package com.loopers.interfaces.api.coupon
 
 import com.loopers.application.coupon.CouponInfo
 import com.loopers.domain.coupon.CouponType
-import com.loopers.domain.coupon.PageResult
+import com.loopers.domain.common.PageResult
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.NotNull
