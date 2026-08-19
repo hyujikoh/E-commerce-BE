@@ -138,3 +138,59 @@ Reservation 1건의 일자별 **가격 스냅샷**. 환불 산정의 기반.
 **불변식**:
 - `(guest_id, property_id)` UNIQUE — 중복 찜 불가
 - RoomType이 아닌 Property 단위 (객실 타입별 찜은 후속 검토)
+
+---
+
+## PropertyWishlistCount
+
+숙소(Property)별 **찜 수 카운터**. 찜 목록 매번 집계(`COUNT(*)`) 대신 별도 카운터 row를 두어 조회를 빠르게 하고, 동시 찜/찜취소의 정합성을 보장한다.
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `property_id` | bigint | PK·FK → Property (숙소당 1 row) |
+| `count` | bigint | 현재 찜 수 (`>= 0`) |
+
+**불변식**:
+- 숙소당 정확히 1 row (`property_id` 단일 PK)
+- 증감은 **원자적 조건부 UPDATE**(`SET count = count + 1` / `count = count - 1 WHERE count > 0`)로만 수행 → Lost Update 차단
+- `WishlistService`가 찜/찜취소와 **같은 트랜잭션**에서 증감 후 카운트를 읽어 반환(read-your-writes)하여, 응답 카운트가 타 요청 증감에 오염되지 않음
+
+---
+
+## Coupon (쿠폰 템플릿)
+
+발급 가능한 **쿠폰의 정의**. admin이 등록·수정·삭제하며, 사용자는 이 템플릿을 발급받아 `IssuedCoupon`을 보유한다.
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `id` | bigint | PK |
+| `name` | varchar | 쿠폰명 (예: "여름 휴가 10% 할인") |
+| `type` | enum | `FIXED`(정액) / `RATE`(정률) |
+| `value` | bigint | 정액: 할인 금액(원), 정률: 퍼센트(%) |
+| `min_order_amount` | bigint nullable | 최소 결제 금액 조건 (선택) |
+| `expired_at` | timestamp | 만료 시각 |
+
+**할인 계산**:
+- `FIXED`: `discount = min(value, orderAmount)` — 원금 초과 할인 방지
+- `RATE`: `discount = floor(orderAmount × value / 100)` — 원 단위 절사, 원금 캡 적용
+- `min_order_amount` 미달 시 사용 불가
+
+---
+
+## IssuedCoupon (발급 쿠폰)
+
+사용자가 발급받아 **소유한 쿠폰 1장**. 재사용 불가하며 예약 결제 시 1건당 1장만 적용된다.
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `id` | bigint | PK |
+| `user_id` | bigint | 소유자 (`users.id` 참조) |
+| `coupon_id` | bigint | FK → Coupon 템플릿 |
+| `status` | enum | `AVAILABLE` / `USED` / `EXPIRED` |
+| `used_at` | timestamp nullable | 사용 시각 |
+
+**불변식**:
+- `(user_id, coupon_id)` UNIQUE — 1인당 같은 템플릿 1회 발급 (중복 발급은 `COUPON_ALREADY_ISSUED`)
+- 사용은 `AVAILABLE` 상태에서만 1회 가능 — 조건부 UPDATE로 동시 사용 시 1건만 성공(`COUPON_ALREADY_USED`)
+- 사용 시점에 만료(`expired_at` 경과)면 `COUPON_EXPIRED`
+- 타 유저 소유 쿠폰 사용 시 `COUPON_NOT_OWNED`

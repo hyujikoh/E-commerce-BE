@@ -9,11 +9,18 @@ import java.time.LocalDate
 class ReservationFacade(
     private val reservationService: ReservationService,
 ) {
-    fun create(guestId: Long, roomTypeId: Long, checkIn: LocalDate, checkOut: LocalDate): ReservationInfo {
+    fun create(
+        guestId: Long,
+        roomTypeId: Long,
+        checkIn: LocalDate,
+        checkOut: LocalDate,
+        couponId: Long? = null,
+    ): ReservationInfo {
         val reservation = reservationService.create(
             guestId = guestId,
             roomTypeId = roomTypeId,
             stayPeriod = DateRange(checkIn, checkOut),
+            couponId = couponId,
         )
         return ReservationInfo.from(reservation)
     }

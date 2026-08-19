@@ -23,6 +23,8 @@ class ReservationV1Dto {
         @field:NotNull
         @Schema(description = "체크아웃 날짜 (YYYY-MM-DD)")
         val checkOut: LocalDate,
+        @Schema(description = "적용할 발급 쿠폰 ID(내 쿠폰의 issuedCouponId). 미적용 시 생략", example = "42")
+        val couponId: Long? = null,
     )
 
     @Schema(description = "예약 응답")
@@ -34,6 +36,9 @@ class ReservationV1Dto {
         val checkOut: LocalDate,
         val status: ReservationStatus,
         val totalAmount: Long,
+        val discountAmount: Long,
+        val finalAmount: Long,
+        val appliedCouponId: Long?,
         val currency: String,
         val expiresAt: ZonedDateTime,
         val nightly: List<NightlyResponse>,
@@ -50,6 +55,9 @@ class ReservationV1Dto {
                     checkOut = info.checkOut,
                     status = info.status,
                     totalAmount = info.totalAmount,
+                    discountAmount = info.discountAmount,
+                    finalAmount = info.finalAmount,
+                    appliedCouponId = info.appliedCouponId,
                     currency = info.currency,
                     expiresAt = info.expiresAt,
                     nightly = info.nightly.map { NightlyResponse(it.date, it.amount) },

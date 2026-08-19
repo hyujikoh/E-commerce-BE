@@ -7,9 +7,15 @@
 # - 1주차 commerce-user 도메인은 코드(`apps/commerce-api/.../domain/user`)에 존재하나
 #   ontology entity로는 미등록 → 후속 라운드에서 commerce-user 도메인 추가 후 관계 정의
 
-relations: []
+relations:
+  # 예약 생성 시 쿠폰 사용 처리를 단일 트랜잭션에서 호출 (Round 4)
+  - from: accommodation/reservation-service
+    to: coupon/coupon-service
+    type: depends_on
+    note: ReservationService.create 가 couponId 지정 시 coupon-service.use 를 호출해 할인 계산 + USED 전이. 같은 @Transactional 경계 안에서 처리되어 실패 시 전체 롤백.
 
 # 후속 라운드에서 추가 예정:
 # - commerce-user/user-model → accommodation/reservation (references, "guest_id")
 # - commerce-user/user-model → accommodation/property      (references, "host_id")
 # - commerce-user/user-model → accommodation/wishlist      (references, "guest_id")
+# - commerce-user/user-model → coupon/issued-coupon        (references, "user_id")

@@ -10,6 +10,7 @@ import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.MethodArgumentNotValidException
+import org.springframework.web.bind.MissingRequestHeaderException
 import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
@@ -45,6 +46,12 @@ class ApiControllerAdvice {
         val name = e.parameterName
         val type = e.parameterType
         val message = "필수 요청 파라미터 '$name' (타입: $type)가 누락되었습니다."
+        return failureResponse(errorType = ErrorType.BAD_REQUEST, errorMessage = message)
+    }
+
+    @ExceptionHandler
+    fun handleBadRequest(e: MissingRequestHeaderException): ResponseEntity<ApiResponse<*>> {
+        val message = "필수 요청 헤더 '${e.headerName}'가 누락되었습니다."
         return failureResponse(errorType = ErrorType.BAD_REQUEST, errorMessage = message)
     }
 

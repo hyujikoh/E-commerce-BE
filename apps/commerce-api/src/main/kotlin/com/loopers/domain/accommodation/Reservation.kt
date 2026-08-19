@@ -38,6 +38,9 @@ class Reservation private constructor(
     stayPeriod: DateRange,
     nightlySnapshots: List<ReservationNightly>,
     totalAmount: Money,
+    discountAmount: Money,
+    finalAmount: Money,
+    appliedCouponId: Long?,
     expiresAt: ZonedDateTime,
 ) : BaseEntity() {
 
@@ -57,6 +60,25 @@ class Reservation private constructor(
     @AttributeOverride(name = "amount", column = Column(name = "total_amount", nullable = false))
     @AttributeOverride(name = "currency", column = Column(name = "total_currency", nullable = false, length = 3))
     var totalAmount: Money = totalAmount
+        protected set
+
+    /** 쿠폰 할인액(미적용 시 0). 스냅샷이므로 예약 시점 값으로 고정한다. */
+    @Embedded
+    @AttributeOverride(name = "amount", column = Column(name = "discount_amount", nullable = false))
+    @AttributeOverride(name = "currency", column = Column(name = "discount_currency", nullable = false, length = 3))
+    var discountAmount: Money = discountAmount
+        protected set
+
+    /** 최종 결제 금액(= 총액 − 할인액). 스냅샷. */
+    @Embedded
+    @AttributeOverride(name = "amount", column = Column(name = "final_amount", nullable = false))
+    @AttributeOverride(name = "currency", column = Column(name = "final_currency", nullable = false, length = 3))
+    var finalAmount: Money = finalAmount
+        protected set
+
+    /** 적용된 발급 쿠폰 ID(IssuedCoupon.id). 미적용 시 null. 다른 애그리거트는 ID 로만 참조한다. */
+    @Column(name = "applied_coupon_id")
+    var appliedCouponId: Long? = appliedCouponId
         protected set
 
     @OneToMany(cascade = [CascadeType.ALL], orphanRemoval = true, fetch = FetchType.LAZY)
@@ -134,6 +156,7 @@ class Reservation private constructor(
          * 예약을 생성한다(PENDING).
          * - 가격 스냅샷 일수가 투숙 일수와 일치해야 한다.
          * - 총액은 스냅샷 합으로 파생한다(외부가 임의 총액을 주입하지 못하게).
+         * - 최종 금액은 총액 − 할인액으로 파생한다(할인액이 총액을 초과하면 Money.minus 가드가 막는다).
          * - 만료 시각은 now + holdDuration.
          */
         fun create(
@@ -142,6 +165,8 @@ class Reservation private constructor(
             stayPeriod: DateRange,
             nightlySnapshots: List<ReservationNightly>,
             holdDuration: Duration,
+            discountAmount: Money = Money.ZERO_KRW,
+            appliedCouponId: Long? = null,
             now: ZonedDateTime = ZonedDateTime.now(),
         ): Reservation {
             if (nightlySnapshots.isEmpty()) {
@@ -154,12 +179,16 @@ class Reservation private constructor(
                 )
             }
             val total = nightlySnapshots.map { it.amount }.reduce(Money::plus)
+            val finalAmount = total - discountAmount
             return Reservation(
                 guestId = guestId,
                 roomTypeId = roomTypeId,
                 stayPeriod = stayPeriod,
                 nightlySnapshots = nightlySnapshots,
                 totalAmount = total,
+                discountAmount = discountAmount,
+                finalAmount = finalAmount,
+                appliedCouponId = appliedCouponId,
                 expiresAt = now.plus(holdDuration),
             )
         }

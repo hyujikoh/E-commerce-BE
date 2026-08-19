@@ -5,7 +5,7 @@
 domain:
   id: accommodation
   name: 숙박 커머스
-  summary: 숙소·객실 타입·일자별 재고/요금·찜·예약을 다루는 도메인. Round 2 설계 확정, Round 3에서 예약 생성 핵심 슬라이스(Reservation·재고 차감·가격 스냅샷) 구현. 나머지(검색·취소·만료·찜·Property/RoomType)는 후속.
+  summary: 숙소·객실 타입·일자별 재고/요금·찜·예약을 다루는 도메인. Round 2 설계 확정, Round 3에서 예약 생성 핵심 슬라이스(Reservation·재고 차감·가격 스냅샷) 구현, Round 4에서 찜(Wishlist·찜 수 카운터)과 예약-쿠폰 트랜잭션/락/동시성 구현. 나머지(검색·취소·만료·Property/RoomType)는 후속.
   wiki_root: wiki/accommodation/
 
 # ══════════════════════════════════════
@@ -71,11 +71,20 @@ entities:
   - id: wishlist
     name: Wishlist (찜)
     type: data
-    summary: 게스트가 Property를 즐겨찾기한 기록. (guest_id, property_id) UNIQUE.
+    summary: 게스트가 Property를 즐겨찾기한 기록. (guest_id, property_id) UNIQUE. Round 4 구현 — 별도 최상위 패키지(domain/wishlist)에 배치.
     wiki_doc: wiki/accommodation/glossary.md#wishlist
     repo: e-commerce-BE
-    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/wishlist
-    status: planned
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/wishlist
+    status: active
+
+  - id: property-wishlist-count
+    name: PropertyWishlistCount (숙소 찜 수)
+    type: data
+    summary: 숙소별 찜 수 카운터 row. COUNT(*) 집계 대신 별도 카운터를 두어 조회를 빠르게 하고, 원자적 조건부 UPDATE(count±1)로 동시 찜/찜취소 Lost Update를 차단한다.
+    wiki_doc: wiki/accommodation/glossary.md#property-wishlist-count
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/wishlist
+    status: active
 
   # ─── Process ───
   - id: property-search
@@ -113,6 +122,15 @@ entities:
     repo: e-commerce-BE
     package: apps/commerce-api/src/main/kotlin/com/loopers/application/accommodation/scheduler
     status: planned
+
+  - id: wishlist-service
+    name: WishlistService
+    type: process
+    summary: 찜/찜취소와 숙소별 찜 수 카운터 증감을 단일 트랜잭션에서 처리한다. 원자적 조건부 UPDATE(count±1) + read-your-writes로 동시 요청의 찜 수 정합성을 보장한다.
+    wiki_doc: wiki/accommodation/design-decisions.md#transaction-lock
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/wishlist
+    status: active
 
   # ─── External ───
   - id: payment-gateway
@@ -152,6 +170,10 @@ relations:
     to: property
     type: references
     note: property_id FK + (guest_id, property_id) UNIQUE
+  - from: property-wishlist-count
+    to: property
+    type: references
+    note: property_id PK·FK. 숙소당 1 row의 찜 수 카운터
 
   # ─── 검색 협력 ───
   - from: property-search
@@ -189,6 +211,16 @@ relations:
     type: owns
     note: atomic UPDATE로 remaining 차감·복구
 
+  # ─── 찜 흐름 ───
+  - from: wishlist-service
+    to: wishlist
+    type: owns
+    note: 찜/찜취소 라이프사이클 관리 (생성·삭제)
+  - from: wishlist-service
+    to: property-wishlist-count
+    type: owns
+    note: 원자적 조건부 UPDATE로 count 증감 + read-your-writes 반환
+
   # ─── 만료·취소 흐름 ───
   - from: expiration-scheduler
     to: reservation-service
@@ -221,6 +253,15 @@ relations:
   - from: daily-room-rate
     to: mysql
     type: deployed_in
+  - from: wishlist
+    to: mysql
+    type: deployed_in
+  - from: property-wishlist-count
+    to: mysql
+    type: deployed_in
+  - from: wishlist-service
+    to: mysql
+    type: deployed_in
 
 # ══════════════════════════════════════
 # Notes
@@ -232,9 +273,12 @@ notes:
       Round 2: 설계 확정. Round 3: 예약 생성 핵심 슬라이스 구현 —
       reservation, reservation-nightly, daily-room-inventory, daily-room-rate,
       reservation-service(create 만), inventory-service(reserve 만)가 `active`.
+      Round 4: 찜(wishlist, property-wishlist-count, wishlist-service)과 예약-쿠폰 통합 구현.
+      찜은 별도 최상위 패키지(domain/wishlist)에 배치(예약과 응집도 낮음). 쿠폰은 별도 도메인(abox/coupon.yaml).
+      reservation-service.create 가 coupon 도메인의 사용 처리를 단일 트랜잭션에서 호출(cross-domain 참조).
       구현은 BaseEntity 컨벤션(surrogate Long PK)을 따르므로, 설계의 복합 PK 는 UNIQUE 제약으로 동일 보장한다.
-      나머지(property, room-type, wishlist, property-search, expiration-scheduler)는 `planned`.
-      모든 active entity 코드는 apps/commerce-api/.../domain/accommodation 패키지에 flat 배치.
+      나머지(property, room-type, property-search, expiration-scheduler)는 `planned`.
+      예약·재고·요금 active entity 코드는 apps/commerce-api/.../domain/accommodation 패키지에 flat 배치, 찜은 domain/wishlist.
 
   - id: state-machine
     body: |

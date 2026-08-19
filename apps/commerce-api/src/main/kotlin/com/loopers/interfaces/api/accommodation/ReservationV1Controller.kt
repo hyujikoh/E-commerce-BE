@@ -22,6 +22,7 @@ class ReservationV1Controller(
             roomTypeId = request.roomTypeId,
             checkIn = request.checkIn,
             checkOut = request.checkOut,
+            couponId = request.couponId,
         )
             .let { ReservationV1Dto.ReservationResponse.from(it) }
             .let { ApiResponse.success(it) }

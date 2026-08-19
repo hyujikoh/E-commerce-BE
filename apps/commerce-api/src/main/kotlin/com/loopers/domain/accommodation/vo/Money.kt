@@ -17,7 +17,7 @@ data class Money(
     val amount: Long,
     @Column(name = "currency", nullable = false, length = 3)
     val currency: String,
-) {
+) : Comparable<Money> {
     init {
         if (amount < 0) {
             throw CoreException(ErrorType.BAD_REQUEST, "금액은 음수일 수 없습니다.")
@@ -28,13 +28,33 @@ data class Money(
     }
 
     operator fun plus(other: Money): Money {
-        if (currency != other.currency) {
-            throw CoreException(ErrorType.BAD_REQUEST, "통화가 다른 금액은 더할 수 없습니다. ($currency, ${other.currency})")
-        }
+        requireSameCurrency(other)
         return copy(amount = amount + other.amount)
+    }
+
+    /**
+     * 차감. 결과가 음수면 init 가드에서 예외가 발생한다(할인액이 원금을 초과할 수 없음을 강제).
+     */
+    operator fun minus(other: Money): Money {
+        requireSameCurrency(other)
+        return copy(amount = amount - other.amount)
+    }
+
+    /** 같은 통화끼리만 비교한다. */
+    override fun compareTo(other: Money): Int {
+        requireSameCurrency(other)
+        return amount.compareTo(other.amount)
+    }
+
+    private fun requireSameCurrency(other: Money) {
+        if (currency != other.currency) {
+            throw CoreException(ErrorType.BAD_REQUEST, "통화가 다른 금액은 연산할 수 없습니다. ($currency, ${other.currency})")
+        }
     }
 
     companion object {
         fun krw(amount: Long): Money = Money(amount, "KRW")
+
+        val ZERO_KRW: Money = krw(0)
     }
 }
