@@ -35,13 +35,10 @@ class PropertySearchJdbcRepository(
             .addValue("limit", condition.size)
             .addValue("offset", condition.page.toLong() * condition.size)
 
-        val totalElements = jdbcTemplate.queryForObject(COUNT_SQL, params, Long::class.java) ?: 0L
-        if (totalElements == 0L) {
-            return PageResult(emptyList(), condition.page, condition.size, 0L, 0)
-        }
-
         val sql = "$SELECT_SQL ORDER BY ${orderBy(condition.sort)} LIMIT :limit OFFSET :offset"
+        var totalElements = 0L
         val content = jdbcTemplate.query(sql, params) { rs, _ ->
+            totalElements = rs.getLong("total_count")
             PropertySearchRow(
                 propertyId = rs.getLong("id"),
                 name = rs.getString("name"),
@@ -49,6 +46,10 @@ class PropertySearchJdbcRepository(
                 wishlistCount = rs.getLong("wishlist_count"),
                 minTotalAmount = rs.getLong("min_total_amount"),
             )
+        }
+        // 빈 결과는 "조건 일치 0건"과 "범위 밖 페이지" 두 경우가 있어 이때만 COUNT 를 별도 실행한다.
+        if (content.isEmpty()) {
+            totalElements = jdbcTemplate.queryForObject(COUNT_SQL, params, Long::class.java) ?: 0L
         }
         val totalPages = ((totalElements + condition.size - 1) / condition.size).toInt()
         return PageResult(content, condition.page, condition.size, totalElements, totalPages)
@@ -89,15 +90,18 @@ class PropertySearchJdbcRepository(
             GROUP BY t.property_id
         """.trimIndent()
 
+        /** 파생 테이블이 검색 비용의 대부분이라 총 건수는 COUNT(*) OVER() 윈도 함수로 본 쿼리에서 함께 얻는다. */
         private val SELECT_SQL = """
             SELECT p.id, p.name, p.city,
                    COALESCE(pwc.wishlist_count, 0) AS wishlist_count,
-                   s.min_total_amount
+                   s.min_total_amount,
+                   COUNT(*) OVER() AS total_count
             FROM ( $AVAILABLE_PER_PROPERTY ) s
             JOIN property p ON p.id = s.property_id
             LEFT JOIN property_wishlist_count pwc ON pwc.property_id = s.property_id
         """.trimIndent()
 
+        /** 본 쿼리가 0행일 때(조건 일치 0건 vs 범위 밖 페이지 구분)만 쓰는 폴백. */
         private val COUNT_SQL = "SELECT COUNT(*) FROM ( $AVAILABLE_PER_PROPERTY ) s"
     }
 }

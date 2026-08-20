@@ -76,7 +76,7 @@ Major 2건 모두 기능 정확성 문제가 아니라 캐시 미스 경로의 �
 ## 후속 작업 후보
 
 - [x] M1: `SEARCH_TTL` 지터 적용 → 부하 테스트 재측정 완료. **지터 단독으로는 부족** — 개별 키의 만료 herd만으로 풀 고갈이 재현됐다(`round5-load-test.md` § 5). stale-while-revalidate 또는 single-flight가 후속 필요.
-- [ ] M2: `COUNT(*) OVER()` 단일 쿼리 전환 검토 → `round5-search-optimization.md` 수치 갱신
+- [x] M2: `COUNT(*) OVER()` 단일 쿼리 전환 완료 → `round5-search-optimization.md` § 3에 실측 기록 (시나리오 A 웜: 249 ms → 129 ms, −48%). 빈 결과는 COUNT 폴백으로 구분.
 - [x] m1: `design-decisions.md#search-cache` 찜 수 서술에 한정어 추가 완료 — 매 조회 병합은 상세 경로 기준, 검색 내 찜 수는 페이지와 함께 최대 70초 낡을 수 있음을 명시
 - [x] m2: coupon import 블록 정리 완료 — `CouponService`·`IssuedCouponRepository`의 빈 줄 분리를 병합 (`CouponRepository`는 단일 import라 이탈 없음)
 - [ ] Q1·Q2: 정책 결정 후 코드 반영 또는 ontology `notes`에 정책 기록

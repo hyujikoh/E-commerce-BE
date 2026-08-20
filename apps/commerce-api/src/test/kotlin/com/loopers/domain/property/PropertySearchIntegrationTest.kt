@@ -211,6 +211,23 @@ class PropertySearchIntegrationTest @Autowired constructor(
                 { assertThat(secondPage.content.map { it.propertyId }).containsExactly(ids[2]) },
             )
         }
+
+        @DisplayName("범위 밖 페이지는 내용이 비어도 전체 건수를 반환한다.")
+        @Test
+        fun returnsTotalOnOutOfRangePage() {
+            repeat(3) { i ->
+                val p = property("숙소$i")
+                seedStay(roomType(p.id).id)
+            }
+
+            val result = propertyService.search(condition(size = 2, page = 5))
+
+            assertAll(
+                { assertThat(result.content).isEmpty() },
+                { assertThat(result.totalElements).isEqualTo(3L) },
+                { assertThat(result.totalPages).isEqualTo(2) },
+            )
+        }
     }
 
     @DisplayName("숙소 상세를 조회할 때,")
