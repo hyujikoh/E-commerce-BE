@@ -58,7 +58,7 @@ Arguments:
 - **작업 디렉토리 결정**:
   1. `--target`이 지정되면: 해당 경로를 작업 디렉토리(`WORK_DIR`)로 사용. `test -d`로 존재 확인, 실패 시 에러.
   2. `--target`이 없으면: `git rev-parse --show-toplevel`로 Git 루트를 확인하여 `WORK_DIR`로 사용.
-- `WORK_DIR`이 결정되면 이후 **모든 git 명령은 `git -C ${WORK_DIR}`**, **빌드/린트 명령은 `(cd ${WORK_DIR} && <명령>)`** 으로 실행한다.
+- `WORK_DIR`이 결정되면 이후 **조회성 git 명령은 `git -C ${WORK_DIR}`**, **빌드/린트 명령은 `(cd ${WORK_DIR} && <명령>)`** 으로 실행한다. 단, **`git commit` 실행은 `(cd ${WORK_DIR} && git commit ...)` 형태를 사용한다** — permission 훅이 `git -C` 뒤의 서브커맨드를 파싱하지 못해 커밋이 차단된다.
 - Git 저장소인지 확인: `git -C ${WORK_DIR} rev-parse --is-inside-work-tree`
 - 커밋할 변경사항이 있는지 확인 (없으면: "커밋할 변경사항이 없습니다.")
 - 커밋 전에 lint와 test를 실행한다:
@@ -113,12 +113,12 @@ Arguments:
 6. 스테이징:
    - 제외 파일 없음: `git add -A`
    - 제외 파일 있음: `git add <나머지 파일 각각 지정>`
-7. 커밋 메시지를 `-m` 인자에 직접 전달:
+7. 커밋 메시지를 `-m` 인자에 직접 전달. `(cd ${WORK_DIR} && ...)` 서브셸 안에서 실행한다:
    ```bash
-   git commit -m "[ISSUE-KEY] 제목
+   (cd ${WORK_DIR} && git commit -m "[ISSUE-KEY] 제목
 
    - 변경사항 1
-   - 변경사항 2"
+   - 변경사항 2")
    ```
    개행은 쉘 문자열 내에 직접 포함한다. HEREDOC 중첩은 금지 — `.claude/rules/behavior.md § 8` 참조.
 8. 커밋이 실패하면 `git reset HEAD`로 스테이징을 원복한 뒤, step 0에서 캡처한 기존 staged 파일이 있으면 `git add <파일>`로 재스테이징하여 원래 상태를 복원하고, 사용자에게 에러를 보고한다.
