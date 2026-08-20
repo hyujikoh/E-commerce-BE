@@ -1,7 +1,6 @@
 package com.loopers.domain.coupon
 
 import com.loopers.domain.common.PageResult
-
 import java.time.ZonedDateTime
 
 /** 발급 쿠폰 영속성 포트. 사용 처리는 동시성 안전을 위해 원자적 조건부 UPDATE 로 구현된다. */
