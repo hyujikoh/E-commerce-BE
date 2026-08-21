@@ -1,5 +1,6 @@
 package com.loopers.interfaces.api
 
+import com.loopers.domain.accommodation.CancelReason
 import com.loopers.domain.accommodation.DailyRoomInventory
 import com.loopers.domain.accommodation.DailyRoomRate
 import com.loopers.domain.accommodation.ReservationStatus
@@ -172,6 +173,97 @@ class ReservationV1ApiE2ETest @Autowired constructor(
                 { assertThat(response.statusCode).isEqualTo(HttpStatus.CONFLICT) },
                 { assertThat(remaining).isEqualTo(2) },
             )
+        }
+    }
+
+    private fun createReservation(): Long {
+        dates.forEach { dailyRoomRateJpaRepository.save(DailyRoomRate(roomTypeId, it, Money.krw(50_000))) }
+        dates.forEach { dailyRoomInventoryJpaRepository.save(DailyRoomInventory(roomTypeId, it, remaining = 1)) }
+
+        val body = """{"guestId":1,"roomTypeId":$roomTypeId,"checkIn":"2026-06-10","checkOut":"2026-06-12"}"""
+        val headers = HttpHeaders().apply { contentType = MediaType.APPLICATION_JSON }
+        val responseType = object : ParameterizedTypeReference<ApiResponse<ReservationV1Dto.ReservationResponse>>() {}
+        return testRestTemplate
+            .exchange("/api/v1/reservations", HttpMethod.POST, HttpEntity(body, headers), responseType)
+            .body!!.data!!.id
+    }
+
+    @DisplayName("POST /api/v1/reservations/{id}/confirm")
+    @Nested
+    inner class Confirm {
+        @DisplayName("PENDING 예약이면, CONFIRMED 로 확정된 예약을 반환한다.")
+        @Test
+        fun confirmsReservation() {
+            // arrange
+            val reservationId = createReservation()
+
+            // act
+            val responseType = object : ParameterizedTypeReference<ApiResponse<ReservationV1Dto.ReservationResponse>>() {}
+            val response = testRestTemplate.exchange(
+                "/api/v1/reservations/$reservationId/confirm",
+                HttpMethod.POST,
+                HttpEntity(null, HttpHeaders()),
+                responseType,
+            )
+
+            // assert
+            assertAll(
+                { assertThat(response.statusCode.is2xxSuccessful).isTrue() },
+                { assertThat(response.body?.data?.status).isEqualTo(ReservationStatus.CONFIRMED) },
+            )
+        }
+    }
+
+    @DisplayName("POST /api/v1/reservations/{id}/cancel")
+    @Nested
+    inner class Cancel {
+        @DisplayName("본인의 PENDING 예약이면, USER_REQUEST 사유로 취소하고 재고를 복구한다.")
+        @Test
+        fun cancelsReservation() {
+            // arrange
+            val reservationId = createReservation()
+            val body = """{"guestId":1}"""
+            val headers = HttpHeaders().apply { contentType = MediaType.APPLICATION_JSON }
+
+            // act
+            val responseType = object : ParameterizedTypeReference<ApiResponse<ReservationV1Dto.ReservationResponse>>() {}
+            val response = testRestTemplate.exchange(
+                "/api/v1/reservations/$reservationId/cancel",
+                HttpMethod.POST,
+                HttpEntity(body, headers),
+                responseType,
+            )
+
+            // assert — 취소 응답 + 재고 복구(각 1)
+            val remaining = dailyRoomInventoryJpaRepository.findAll().filter { it.roomTypeId == roomTypeId }.map { it.remaining }
+            assertAll(
+                { assertThat(response.statusCode.is2xxSuccessful).isTrue() },
+                { assertThat(response.body?.data?.status).isEqualTo(ReservationStatus.CANCELLED) },
+                { assertThat(response.body?.data?.cancelReason).isEqualTo(CancelReason.USER_REQUEST) },
+                { assertThat(response.body?.data?.canceledAt).isNotNull() },
+                { assertThat(remaining).containsExactly(1, 1) },
+            )
+        }
+
+        @DisplayName("본인 예약이 아니면, 403 FORBIDDEN 응답을 받는다.")
+        @Test
+        fun returnsForbidden_whenNotOwner() {
+            // arrange
+            val reservationId = createReservation()
+            val body = """{"guestId":2}"""
+            val headers = HttpHeaders().apply { contentType = MediaType.APPLICATION_JSON }
+
+            // act
+            val responseType = object : ParameterizedTypeReference<ApiResponse<ReservationV1Dto.ReservationResponse>>() {}
+            val response = testRestTemplate.exchange(
+                "/api/v1/reservations/$reservationId/cancel",
+                HttpMethod.POST,
+                HttpEntity(body, headers),
+                responseType,
+            )
+
+            // assert
+            assertThat(response.statusCode).isEqualTo(HttpStatus.FORBIDDEN)
         }
     }
 }

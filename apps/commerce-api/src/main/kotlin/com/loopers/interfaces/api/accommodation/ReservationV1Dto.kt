@@ -1,6 +1,7 @@
 package com.loopers.interfaces.api.accommodation
 
 import com.loopers.application.accommodation.ReservationInfo
+import com.loopers.domain.accommodation.CancelReason
 import com.loopers.domain.accommodation.ReservationStatus
 import io.swagger.v3.oas.annotations.media.Schema
 import jakarta.validation.constraints.NotNull
@@ -27,6 +28,14 @@ class ReservationV1Dto {
         val couponId: Long? = null,
     )
 
+    @Schema(description = "예약 취소 요청")
+    data class CancelRequest(
+        // NOTE: 이번 슬라이스는 인증 미연동. 실제로는 @LoopersAuth 로 게스트를 식별한다(후속).
+        @field:NotNull
+        @Schema(description = "게스트(회원) ID — 본인 예약 검증용")
+        val guestId: Long,
+    )
+
     @Schema(description = "예약 응답")
     data class ReservationResponse(
         val id: Long,
@@ -41,6 +50,8 @@ class ReservationV1Dto {
         val appliedCouponId: Long?,
         val currency: String,
         val expiresAt: ZonedDateTime,
+        val cancelReason: CancelReason?,
+        val canceledAt: ZonedDateTime?,
         val nightly: List<NightlyResponse>,
     ) {
         data class NightlyResponse(val date: LocalDate, val amount: Long)
@@ -60,6 +71,8 @@ class ReservationV1Dto {
                     appliedCouponId = info.appliedCouponId,
                     currency = info.currency,
                     expiresAt = info.expiresAt,
+                    cancelReason = info.cancelReason,
+                    canceledAt = info.canceledAt,
                     nightly = info.nightly.map { NightlyResponse(it.date, it.amount) },
                 )
         }

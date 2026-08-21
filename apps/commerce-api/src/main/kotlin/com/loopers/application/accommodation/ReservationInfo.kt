@@ -1,5 +1,6 @@
 package com.loopers.application.accommodation
 
+import com.loopers.domain.accommodation.CancelReason
 import com.loopers.domain.accommodation.Reservation
 import com.loopers.domain.accommodation.ReservationStatus
 import java.time.LocalDate
@@ -18,6 +19,8 @@ data class ReservationInfo(
     val appliedCouponId: Long?,
     val currency: String,
     val expiresAt: ZonedDateTime,
+    val cancelReason: CancelReason?,
+    val canceledAt: ZonedDateTime?,
     val nightly: List<Nightly>,
 ) {
     data class Nightly(val date: LocalDate, val amount: Long)
@@ -37,6 +40,8 @@ data class ReservationInfo(
                 appliedCouponId = reservation.appliedCouponId,
                 currency = reservation.totalAmount.currency,
                 expiresAt = reservation.expiresAt,
+                cancelReason = reservation.cancelReason,
+                canceledAt = reservation.canceledAt,
                 nightly = reservation.nightly
                     .sortedBy { it.date }
                     .map { Nightly(it.date, it.amount.amount) },
