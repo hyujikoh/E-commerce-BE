@@ -120,4 +120,14 @@ class CouponService(
         }
         return discount
     }
+
+    /**
+     * 사용 처리된 쿠폰을 복구한다(USED → AVAILABLE). 예약 취소/만료 트랜잭션에 합류한다.
+     * Reservation 상태 전이 가드가 중복 취소를 차단하므로 정상 경로에서 0행은 발생하지 않지만,
+     * 복구는 멱등으로 두어 재시도에 안전하게 한다.
+     */
+    @Transactional
+    fun restore(issuedCouponId: Long) {
+        issuedCouponRepository.restoreIfUsed(issuedCouponId)
+    }
 }

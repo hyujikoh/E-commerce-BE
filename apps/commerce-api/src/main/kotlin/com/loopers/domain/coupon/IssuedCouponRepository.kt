@@ -20,4 +20,10 @@ interface IssuedCouponRepository {
      * @return 변경된 행 수(1=사용 성공, 0=이미 사용됨/없음). 동시 사용 시 정확히 1건만 1을 반환한다.
      */
     fun markUsedIfAvailable(id: Long, usedAt: ZonedDateTime): Int
+
+    /**
+     * status 가 USED 인 경우에만 AVAILABLE 로 되돌리고 usedAt 을 초기화한다.
+     * @return 변경된 행 수(1=복구, 0=USED 아님/없음).
+     */
+    fun restoreIfUsed(id: Long): Int
 }

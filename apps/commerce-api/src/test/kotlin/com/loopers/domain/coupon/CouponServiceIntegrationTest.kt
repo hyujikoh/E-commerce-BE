@@ -201,6 +201,51 @@ class CouponServiceIntegrationTest @Autowired constructor(
         }
     }
 
+    @DisplayName("쿠폰을 복구할 때,")
+    @Nested
+    inner class Restore {
+        @DisplayName("사용된 쿠폰이면, AVAILABLE 로 되돌아가고 usedAt 이 초기화된다.")
+        @Test
+        fun restoresToAvailable_whenUsed() {
+            val template = fixedTemplate()
+            val issued = couponService.issue(userId, template.id, now)
+            couponService.use(userId, issued.id, Money.krw(100_000), now)
+
+            couponService.restore(issued.id)
+
+            val reloaded = issuedCouponJpaRepository.findById(issued.id).get()
+            assertAll(
+                { assertThat(reloaded.status).isEqualTo(IssuedCouponStatus.AVAILABLE) },
+                { assertThat(reloaded.usedAt).isNull() },
+            )
+        }
+
+        @DisplayName("복구된 쿠폰은 다시 사용할 수 있다.")
+        @Test
+        fun canUseAgain_afterRestore() {
+            val template = fixedTemplate(value = 5_000)
+            val issued = couponService.issue(userId, template.id, now)
+            couponService.use(userId, issued.id, Money.krw(100_000), now)
+            couponService.restore(issued.id)
+
+            val discount = couponService.use(userId, issued.id, Money.krw(100_000), now)
+
+            assertThat(discount).isEqualTo(Money.krw(5_000))
+        }
+
+        @DisplayName("사용되지 않은 쿠폰이면, 아무 일도 일어나지 않는다(멱등).")
+        @Test
+        fun doesNothing_whenNotUsed() {
+            val template = fixedTemplate()
+            val issued = couponService.issue(userId, template.id, now)
+
+            couponService.restore(issued.id)
+
+            val reloaded = issuedCouponJpaRepository.findById(issued.id).get()
+            assertThat(reloaded.status).isEqualTo(IssuedCouponStatus.AVAILABLE)
+        }
+    }
+
     @DisplayName("동일 쿠폰으로 여러 요청이 동시에 사용하면,")
     @Nested
     inner class ConcurrentUse {
