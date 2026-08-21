@@ -5,7 +5,7 @@
 domain:
   id: accommodation
   name: 숙박 커머스
-  summary: 숙소·객실 타입·일자별 재고/요금·찜·예약을 다루는 도메인. Round 2 설계 확정, Round 3에서 예약 생성 핵심 슬라이스(Reservation·재고 차감·가격 스냅샷) 구현, Round 4에서 찜(Wishlist·찜 수 카운터)과 예약-쿠폰 트랜잭션/락/동시성 구현, Round 5에서 숙소 검색·상세 조회(Property/RoomType·인덱스·Redis 캐시) 구현. 나머지(취소·만료)는 후속.
+  summary: 숙소·객실 타입·일자별 재고/요금·찜·예약을 다루는 도메인. Round 2 설계 확정, Round 3에서 예약 생성 핵심 슬라이스(Reservation·재고 차감·가격 스냅샷) 구현, Round 4에서 찜(Wishlist·찜 수 카운터)과 예약-쿠폰 트랜잭션/락/동시성 구현, Round 5에서 숙소 검색·상세 조회(Property/RoomType·인덱스·Redis 캐시) 구현, Round 6에서 예약 확정·취소·만료(재고/쿠폰 복구·만료 스케줄러) 구현.
   wiki_root: wiki/accommodation/
 
 # ══════════════════════════════════════
@@ -99,7 +99,7 @@ entities:
   - id: reservation-service
     name: ReservationService
     type: process
-    summary: 예약 생성·확정·취소·만료를 다루는 도메인 서비스. Reservation aggregate의 상태 전이를 호출하고 InventoryService에 재고 차감/복구를 위임한다. (Round 3 슬라이스: create 만 구현, 확정·취소·만료는 후속.)
+    summary: 예약 생성·확정·취소·만료를 다루는 도메인 서비스. Reservation aggregate의 상태 전이를 호출하고 InventoryService에 재고 차감/복구를 위임한다. 상태 전이는 예약 행 FOR UPDATE 잠금 후 애그리거트 전이 가드로 직렬화하며, 취소·만료 시 재고는 항상, 쿠폰은 PENDING에서 취소·만료된 경우만 복구한다.
     wiki_doc: wiki/accommodation/design-decisions.md#reservation-flow
     repo: e-commerce-BE
     package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation
@@ -108,7 +108,7 @@ entities:
   - id: inventory-service
     name: InventoryService
     type: process
-    summary: 일자별 재고 차감·복구 단독 책임. 단일 RDB 트랜잭션 + atomic UPDATE(WHERE remaining > 0)로 동시성 보장. Reservation 도메인은 직접 inventory를 만지지 않는다. (Round 3 슬라이스: reserve 만 구현, release 는 취소 슬라이스에서.)
+    summary: 일자별 재고 차감·복구 단독 책임. 단일 RDB 트랜잭션 + atomic UPDATE(차감은 WHERE remaining > 0, 복구는 +1)로 동시성 보장. Reservation 도메인은 직접 inventory를 만지지 않는다.
     wiki_doc: wiki/accommodation/design-decisions.md#inventory-atomic
     repo: e-commerce-BE
     package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation
@@ -117,11 +117,11 @@ entities:
   - id: expiration-scheduler
     name: ExpirationScheduler
     type: process
-    summary: 1분 주기로 만료된 PENDING 예약을 스캔(FOR UPDATE SKIP LOCKED)하여 cancel + release를 실행. 사용자 결제 재진입 시점도 같은 expire 함수를 호출.
+    summary: 1분 주기로 만료된 PENDING 예약을 스캔(FOR UPDATE SKIP LOCKED)하여 cancel + release를 실행. 사용자 결제 재진입 시점도 같은 expire 함수를 호출. scheduler.reservation-expiration.enabled 프로퍼티로 끌 수 있다(기본 on).
     wiki_doc: wiki/accommodation/design-decisions.md#pending-expiration
     repo: e-commerce-BE
     package: apps/commerce-api/src/main/kotlin/com/loopers/application/accommodation/scheduler
-    status: planned
+    status: active
 
   - id: wishlist-service
     name: WishlistService
@@ -296,7 +296,9 @@ notes:
       검색 read model 은 infrastructure/property/PropertySearchJdbcRepository(네이티브 SQL),
       캐시는 application/property/PropertyFacade + infrastructure/property/PropertyRedisCacheRepository(cache-aside).
       벤치마크 시드는 support/seed/Round5SeedRunner(seed 프로필), 측정 결과는 docs/perf/round5-search-optimization.md.
-      나머지(expiration-scheduler)는 `planned`.
+      Round 6: 예약 확정·취소·만료 슬라이스 — reservation-service 생애주기 완성(confirm/cancel/expire/expireOverdue),
+      inventory-service.release, coupon 복구(restoreIfUsed), expiration-scheduler 가 `active`.
+      결제 webhook·outbox, NO_SHOW/자동 체크아웃 스케줄러, 환불 산정은 후속.
       예약·재고·요금 active entity 코드는 apps/commerce-api/.../domain/accommodation 패키지에 flat 배치, 찜은 domain/wishlist, 숙소·객실 타입은 domain/property.
 
   - id: state-machine
