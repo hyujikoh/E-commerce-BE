@@ -10,4 +10,7 @@ class DailyRoomInventoryRepositoryImpl(
 ) : DailyRoomInventoryRepository {
     override fun decrementIfAvailable(roomTypeId: Long, date: LocalDate): Boolean =
         dailyRoomInventoryJpaRepository.decrementIfAvailable(roomTypeId, date) == 1
+
+    override fun increment(roomTypeId: Long, date: LocalDate): Boolean =
+        dailyRoomInventoryJpaRepository.increment(roomTypeId, date) == 1
 }

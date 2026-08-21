@@ -79,6 +79,33 @@ class InventoryServiceIntegrationTest @Autowired constructor(
         }
     }
 
+    @DisplayName("재고를 복구할 때,")
+    @Nested
+    inner class Release {
+        @DisplayName("차감했던 일자별 재고가 +1 되돌아온다.")
+        @Test
+        fun incrementsRemaining_forEachDate() {
+            // arrange — 2개 중 1개 차감된 상태
+            val seeded = dailyRoomInventoryJpaRepository.save(DailyRoomInventory(roomTypeId, date, remaining = 2))
+            inventoryService.reserve(roomTypeId, listOf(date))
+
+            // act
+            inventoryService.release(roomTypeId, listOf(date))
+
+            // assert
+            val remaining = dailyRoomInventoryJpaRepository.findById(seeded.id).get().remaining
+            assertThat(remaining).isEqualTo(2)
+        }
+
+        @DisplayName("재고 행이 존재하지 않으면, INTERNAL_ERROR 예외가 발생한다.")
+        @Test
+        fun throwsInternalError_whenRowMissing() {
+            // act & assert — 시드 없이 복구 시도
+            val exception = assertThrows<CoreException> { inventoryService.release(roomTypeId, listOf(date)) }
+            assertThat(exception.errorType).isEqualTo(ErrorType.INTERNAL_ERROR)
+        }
+    }
+
     @DisplayName("같은 날짜의 마지막 1개를 여러 요청이 동시에 차감하면,")
     @Nested
     inner class Concurrency {
