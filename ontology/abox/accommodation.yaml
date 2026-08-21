@@ -5,7 +5,7 @@
 domain:
   id: accommodation
   name: 숙박 커머스
-  summary: 숙소·객실 타입·일자별 재고/요금·찜·예약을 다루는 도메인. Round 2 설계 확정, Round 3에서 예약 생성 핵심 슬라이스(Reservation·재고 차감·가격 스냅샷) 구현, Round 4에서 찜(Wishlist·찜 수 카운터)과 예약-쿠폰 트랜잭션/락/동시성 구현. 나머지(검색·취소·만료·Property/RoomType)는 후속.
+  summary: 숙소·객실 타입·일자별 재고/요금·찜·예약을 다루는 도메인. Round 2 설계 확정, Round 3에서 예약 생성 핵심 슬라이스(Reservation·재고 차감·가격 스냅샷) 구현, Round 4에서 찜(Wishlist·찜 수 카운터)과 예약-쿠폰 트랜잭션/락/동시성 구현, Round 5에서 숙소 검색·상세 조회(Property/RoomType·인덱스·Redis 캐시) 구현. 나머지(취소·만료)는 후속.
   wiki_root: wiki/accommodation/
 
 # ══════════════════════════════════════
@@ -17,20 +17,20 @@ entities:
   - id: property
     name: Property (숙소)
     type: data
-    summary: 호텔·펜션·모텔·리조트 단위의 판매 단위. 한 Property는 N개 RoomType을 소유한다. 호스트가 등록·관리한다.
+    summary: 호텔·펜션·모텔·리조트 단위의 판매 단위. 한 Property는 N개 RoomType을 소유한다. 호스트가 등록·관리한다. Round 5 구현은 검색에 필요한 최소 필드(name, city)만 보유하며 city 에 단일 인덱스(idx_property_city)를 둔다.
     wiki_doc: wiki/accommodation/glossary.md#property
     repo: e-commerce-BE
-    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/property
-    status: planned
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/property
+    status: active
 
   - id: room-type
     name: RoomType (객실 타입)
     type: data
-    summary: 한 Property가 판매하는 객실 카테고리(스탠다드 더블, 디럭스 트윈 등). 최대 수용 인원·침대 타입을 보유. 1 Property : N RoomType.
+    summary: 한 Property가 판매하는 객실 카테고리(스탠다드 더블, 디럭스 트윈 등). 수용 인원(capacity)을 보유. 1 Property : N RoomType. Round 5 구현은 최소 필드(name, capacity)만 보유하며 (property_id, capacity) 복합 인덱스(idx_room_type_property_capacity)를 둔다.
     wiki_doc: wiki/accommodation/glossary.md#roomtype
     repo: e-commerce-BE
-    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/accommodation/roomtype
-    status: planned
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/property
+    status: active
 
   - id: daily-room-inventory
     name: DailyRoomInventory (일자별 재고)
@@ -88,13 +88,13 @@ entities:
 
   # ─── Process ───
   - id: property-search
-    name: PropertySearchService
+    name: PropertySearch (숙소 검색·상세 조회)
     type: process
-    summary: 도시·체크인·체크아웃·인원수로 가용 객실을 조회하고 totalAmount·avgNightlyPrice를 합산한다. 4단 IN-절 조회로 N+1 회피.
+    summary: 도시·체크인·체크아웃·인원수로 가용 숙소를 검색하고 숙소 상세를 조회한다. 네이티브 SQL 파생 테이블에서 (객실타입×일자) GROUP BY + HAVING COUNT = 박수 로 전 일자 가용을 판정하고 숙소별 MIN(기간 총액)을 집계. 정렬 3종 — 가격 오름차순 / 찜 수 내림차순 / 추천(찜수·가격 로그 스케일 가중 스코어 0.7·0.3). Redis cache-aside — 검색 페이지 60초, 상세 10분 TTL, 찜 수·재고·요금은 캐시하지 않음(결제 시점 DB 재확인). 캐시 장애 시 DB 폴백으로 정상 동작.
     wiki_doc: wiki/accommodation/design-decisions.md#search
     repo: e-commerce-BE
-    package: apps/commerce-api/src/main/kotlin/com/loopers/application/accommodation/search
-    status: planned
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/property
+    status: active
 
   - id: reservation-service
     name: ReservationService
@@ -179,19 +179,23 @@ relations:
   - from: property-search
     to: property
     type: consumes
-    note: city 필터로 1차 조회
+    note: city 필터 (idx_property_city) + 상세 조회 대상
   - from: property-search
     to: room-type
     type: consumes
-    note: maxOccupancy >= guestCount 필터
+    note: capacity >= guestCount 필터 (idx_room_type_property_capacity)
   - from: property-search
     to: daily-room-inventory
     type: consumes
-    note: remaining > 0 이고 일자수 일치한 RoomType만 남김
+    note: remaining > 0 이고 기간 전 일자 충족(HAVING COUNT = 박수)한 RoomType만 남김
   - from: property-search
     to: daily-room-rate
     type: consumes
-    note: 합산해 totalAmount, avgNightlyPrice 계산 (B2 스냅샷 이전이므로 추정)
+    note: 기간 요금 합산 후 숙소별 MIN(총액). 요금 원본은 캐시하지 않음
+  - from: property-search
+    to: property-wishlist-count
+    type: consumes
+    note: 찜 수 정렬·추천 스코어 계산 및 검색/상세 응답 표시 (LEFT JOIN, 없으면 0)
 
   # ─── 예약 흐름 ───
   - from: reservation-service
@@ -233,6 +237,16 @@ relations:
 
   # ─── 배포 ───
   - from: property-search
+    to: mysql
+    type: deployed_in
+  - from: property-search
+    to: redis
+    type: deployed_in
+    note: 검색 페이지·상세 캐시(cache-aside). 읽기는 replica 우선, 쓰기는 master
+  - from: property
+    to: mysql
+    type: deployed_in
+  - from: room-type
     to: mysql
     type: deployed_in
   - from: reservation-service
@@ -277,8 +291,13 @@ notes:
       찜은 별도 최상위 패키지(domain/wishlist)에 배치(예약과 응집도 낮음). 쿠폰은 별도 도메인(abox/coupon.yaml).
       reservation-service.create 가 coupon 도메인의 사용 처리를 단일 트랜잭션에서 호출(cross-domain 참조).
       구현은 BaseEntity 컨벤션(surrogate Long PK)을 따르므로, 설계의 복합 PK 는 UNIQUE 제약으로 동일 보장한다.
-      나머지(property, room-type, property-search, expiration-scheduler)는 `planned`.
-      예약·재고·요금 active entity 코드는 apps/commerce-api/.../domain/accommodation 패키지에 flat 배치, 찜은 domain/wishlist.
+      Round 5: 검색 최적화 — property, room-type, property-search 가 `active`.
+      Property/RoomType 은 검색에 필요한 최소 필드로 domain/property 패키지에 신규 구현(예약 도메인의 domain/accommodation 과 분리).
+      검색 read model 은 infrastructure/property/PropertySearchJdbcRepository(네이티브 SQL),
+      캐시는 application/property/PropertyFacade + infrastructure/property/PropertyRedisCacheRepository(cache-aside).
+      벤치마크 시드는 support/seed/Round5SeedRunner(seed 프로필), 측정 결과는 docs/perf/round5-search-optimization.md.
+      나머지(expiration-scheduler)는 `planned`.
+      예약·재고·요금 active entity 코드는 apps/commerce-api/.../domain/accommodation 패키지에 flat 배치, 찜은 domain/wishlist, 숙소·객실 타입은 domain/property.
 
   - id: state-machine
     body: |

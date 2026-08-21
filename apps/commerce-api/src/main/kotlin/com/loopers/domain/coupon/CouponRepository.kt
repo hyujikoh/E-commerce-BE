@@ -1,5 +1,7 @@
 package com.loopers.domain.coupon
 
+import com.loopers.domain.common.PageResult
+
 /** 쿠폰 템플릿 영속성 포트. 조회는 소프트 삭제된 템플릿을 제외한다. */
 interface CouponRepository {
     fun save(coupon: Coupon): Coupon

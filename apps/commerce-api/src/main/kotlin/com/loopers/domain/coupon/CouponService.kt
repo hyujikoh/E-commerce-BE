@@ -1,6 +1,7 @@
 package com.loopers.domain.coupon
 
 import com.loopers.domain.accommodation.vo.Money
+import com.loopers.domain.common.PageResult
 import com.loopers.support.error.CoreException
 import com.loopers.support.error.ErrorType
 import org.springframework.dao.DataIntegrityViolationException

@@ -5,16 +5,36 @@
 
 ---
 
-## search — 검색 흐름 책임 분리
+## search — 검색 read model (Round 5 갱신)
 
-**결정**: 검색은 4단 IN-절 조회로 (Property → RoomType → DailyRoomInventory → DailyRoomRate). 별도 read model을 두지 않는다.
+**결정 (Round 5)**: 검색은 단일 네이티브 SQL 파생 테이블 쿼리로 구현한다. (객실타입 × 일자) JOIN을 `GROUP BY rt.id HAVING COUNT(*) = 박수`로 묶어 "기간 전 일자에 재고·요금이 존재"함을 판정하고, 숙소별 `MIN(기간 총액)`을 집계한 뒤 찜 수(`property_wishlist_count`)를 LEFT JOIN한다. 별도 검색 인덱스(Elasticsearch)는 도입하지 않는다.
+
+**왜** (Round 2의 "4단 IN-절 조회" 결정을 대체):
+- 4단 IN-절은 애플리케이션 4회 왕복 + 메모리 조합이 필요해, 615만 행 규모에서 성능·페이지네이션 모두 불리하다.
+- 정렬(가격/찜/추천)과 페이지네이션이 모두 집계 결과 기준이므로 SQL로 내려야 `LIMIT`이 의미를 가진다.
+- Elasticsearch 등 별도 인덱스는 동기화 비용 대비 이득이 없다 — 인덱스 + 캐시로 충분 (측정: `docs/perf/round5-search-optimization.md`).
+
+**정렬 3종**: 가격 오름차순 / 찜 수 내림차순 / 추천 — `0.7·LN(1+찜수) − 0.3·LN(총액)` 내림차순. 찜 수가 멱분포라 로그 스케일로 눌러 가중 합산한다.
+
+**인덱스**: `idx_property_city`(도시 필터 진입점), `idx_room_type_property_capacity`(property→room_type 조인 + capacity 필터 커버). daily 테이블은 기존 `UNIQUE(room_type_id, date)`가 조인 인덱스를 겸한다.
+
+**대안**: 가용 숙소 사전 집계 테이블 → 재고 변경마다 갱신 비용이 커서 보류. Elasticsearch → 검색 TPS·SLO 근거가 생기면 재검토.
+
+---
+
+## search-cache — 검색·상세 Redis 캐시 (Round 5)
+
+**결정**: 검색 페이지(TTL 60초 ± 10초 지터)와 숙소 상세 기본 정보(TTL 10분)를 cache-aside로 캐시한다. 찜 수는 **상세 조회 경로에서는** 캐시하지 않고 매 조회 시 DB에서 병합한다 — 검색 결과에 포함된 찜 수와 찜 수 기반 정렬 순서는 페이지와 함께 캐시되어 최대 70초(TTL + 지터) 낡을 수 있다. 일자별 재고·요금 원본은 캐시하지 않는다.
 
 **왜**:
-- 이번 라운드는 단일 RDB에서 충분 (대량 트래픽 미발생 가정).
-- 별도 검색 인덱스(Elasticsearch 등)를 도입하면 동기화 비용·일관성 이슈 발생.
-- 성능 한계가 보이면 그 시점에 read model을 분리한다.
+- 검색 결과는 재고 변동으로 금방 낡는다 — 60초는 "목록이 잠깐 낡아도 결제가 막아준다"는 전제에서 허용. 예약 생성이 원자적 조건부 UPDATE로 DB 재고를 재확인하므로(#inventory-atomic), 캐시가 낡아도 초과 판매는 발생하지 않는다.
+- 찜 수는 실시간성 기대가 높고 카운터 테이블 단건 조회가 이미 저렴하다 — 캐시 제외, 상세 응답에서 병합.
+- 캐시 장애 시 warn 로그 + DB 폴백으로 정상 동작한다. Redis는 가용성 요구가 아닌 성능 부가 레이어다.
+- 검색 TTL의 ± 10초 지터는 동시 적재된 키들의 동시 만료(캐시 스탬피드 → 커넥션 풀 고갈)를 분산하기 위한 것 — 부하 테스트로 실증된 문제다(`docs/perf/round5-load-test.md` § 3). 단, 지터만으로는 개별 키의 만료 herd가 남아(§ 5) stale-while-revalidate 또는 single-flight가 후속 과제다.
 
-**대안**: 검색 전용 view / Elasticsearch 인덱스 → 도입 시점은 검색 TPS·응답시간 SLO를 기준으로 판단.
+**키 설계**: `property:v1:detail:{id}` / `property:v1:search:{city}:{checkIn}:{checkOut}:{guests}:{sort}:{page}:{size}`. `v1` 프리픽스로 응답 스키마 변경 시 일괄 무효화.
+
+**무효화**: TTL 만료만 사용(명시적 evict 없음) — 숙소 정보 쓰기 경로가 아직 없고 TTL이 짧아 evict 훅의 복잡도를 정당화하지 못한다.
 
 ---
 

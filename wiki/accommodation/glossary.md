@@ -19,6 +19,8 @@
 
 **불변식**: 한 Property는 정확히 한 호스트가 소유한다. 호스트 변경은 별도 이관 프로세스 (이번 라운드 범위 외).
 
+**구현 (Round 5)**: `domain/property/Property` — 검색 슬라이스에 필요한 `name`, `city`만 구현. `city` 단일 인덱스(`idx_property_city`). host_id/address/description은 후속.
+
 ---
 
 ## RoomType
@@ -37,6 +39,8 @@
 - 1 Property : N RoomType (B3 합의)
 - 같은 RoomType이 여러 Property에 속하지 않음
 - 특정 호실(101호 등) 식별 없음 (B4 합의)
+
+**구현 (Round 5)**: `domain/property/RoomType` — `name`, `capacity`(설계의 max_occupancy)만 구현. `(property_id, capacity)` 복합 인덱스(`idx_room_type_property_capacity`). bed_type은 후속.
 
 ---
 

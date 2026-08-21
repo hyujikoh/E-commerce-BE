@@ -13,7 +13,7 @@
 | `DailyRoomInventory` (일자별 재고) | ✅ | atomic UPDATE 차감, UNIQUE(room_type_id, date) + CHECK(remaining>=0) |
 | `DailyRoomRate` (일자별 요금) | ✅ | 가격 스냅샷 원천 |
 | VO: `Money`, `DateRange` | ✅ | @Embeddable data class + 검증 |
-| `Property`, `RoomType` | ⬜ | 슬라이스에서는 `roomTypeId: Long`(ID 참조)로 대체 |
+| `Property`, `RoomType` | ✅ | Round 5 구현 (아래 참조). Round 3 슬라이스에서는 `roomTypeId: Long`(ID 참조)로 대체했었음 |
 | `Wishlist` | ✅ | Round 4 구현 (아래 참조) |
 
 ### 서비스 / 흐름 (AC)
@@ -26,7 +26,7 @@
 | 소프트 홀드 10분 (P4) | `expiresAt = now + 10분` | 🟡 | 값 설정·생성은 됨. 만료 스케줄러는 ⬜ |
 | 결제 확정 (Main A 7~8) | 결제 webhook → CONFIRMED | ⬜ | 상태 전이 메서드(`confirm`)는 있음, 연동 ⬜ |
 | 취소/만료 + 재고 복구 (Alt B/D) | cancel/expire + `InventoryService.release` | ⬜ | 상태 전이 메서드 있음, release·스케줄러 ⬜ |
-| 검색 (Main A 1~4) | 도시·기간·인원 검색 + 가격 합산 | ⬜ | `PropertySearchService` 후속 |
+| 검색 (Main A 1~4) | 도시·기간·인원 검색 + 가격 합산 | ✅ | Round 5 구현 (아래 참조) |
 | 인증 연동 | `@LoopersAuth` 로 guest 식별 | ⬜ | 현재는 요청 body 의 guestId (의도된 슬라이스 한계) |
 
 ## Round 4 — 쿠폰 + 예약 트랜잭션/락/동시성
@@ -59,9 +59,30 @@
 | 동일 객실·일자 동시 예약 | 더블부킹 없음 | ✅ | `ConcurrentOverlappingDates` (성공 1 / OUT_OF_INVENTORY 9) |
 | 겹치는 다일자 동시 예약 | 모든 일자 정합성 | ✅ | `ConcurrentOverlappingDates` + 날짜 오름차순 락(데드락 회피) |
 
+## Round 5 — 검색 최적화 (인덱스·비정규화·Redis 캐시)
+
+> 측정 결과: `docs/perf/round5-search-optimization.md`. 시드: `support/seed/Round5SeedRunner`(seed 프로필) — 숙소 1만 / 객실 타입 5만 / 일자별 재고·요금 각 615만 행.
+> 캐시 전략: `design-decisions.md#search-cache`. 검색 쿼리 설계: `design-decisions.md#search`.
+
+### 도메인 모델
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| `Property` / `RoomType` | ✅ | `domain/property` 최소 필드 구현 + 인덱스(`idx_property_city`, `idx_room_type_property_capacity`) |
+| 검색 read model | ✅ | `PropertySearchJdbcRepository` 네이티브 SQL — 파생 테이블 `HAVING COUNT = 박수` 가용 판정 + `MIN(총액)` 집계 |
+| Redis 캐시 | ✅ | `PropertyFacade` cache-aside — 상세 10분 / 검색 60초 TTL, 찜 수·재고·요금 캐시 제외 |
+
+### 서비스 / 흐름 (AC)
+| AC | 시나리오 | 상태 | 검증 |
+|----|----------|------|------|
+| 숙소 검색 (Main A 1~4) | 도시·기간·인원 필터 + 전 일자 가용 판정 + 최저 총액 | ✅ | `PropertySearchIntegrationTest` (도시/인원/매진/요금누락/최저가) |
+| 정렬 3종 | 가격 오름차순 / 찜 수 내림차순 / 추천 가중 스코어 | ✅ | `PropertySearchIntegrationTest` sorts* 3건 |
+| 페이지네이션 | totalElements·totalPages + LIMIT/OFFSET | ✅ | `paginates` |
+| 숙소 상세 | 객실 타입 목록 + 찜 수 병합, 미존재/삭제 404 | ✅ | `GetDetail` 3건, `PropertyV1ApiE2ETest` |
+| 상세 캐시 | 2회차부터 캐시 적중, 찜 수는 항상 최신 | ✅ | `PropertyFacadeCacheIntegrationTest$DetailCache` |
+| 검색 캐시 | TTL 내 적중, 미스 시 DB 최신 반영 | ✅ | `PropertyFacadeCacheIntegrationTest$SearchCache` |
+
 ## 다음 슬라이스 후보
 1. 예약 확정/취소/만료 + `InventoryService.release` + 만료 스케줄러
-2. `Property`/`RoomType` 엔티티 + 검색(`PropertySearchService`)
-3. 결제(PG) webhook 연동 + 도메인 이벤트(outbox)
-4. 인증(`@LoopersAuth`) 연동으로 guestId 제거
-5. 예약 API 인증 일원화 (현재 guestId 본문 값 → 헤더/토큰)
+2. 결제(PG) webhook 연동 + 도메인 이벤트(outbox)
+3. 인증(`@LoopersAuth`) 연동으로 guestId 제거
+4. 예약 API 인증 일원화 (현재 guestId 본문 값 → 헤더/토큰)

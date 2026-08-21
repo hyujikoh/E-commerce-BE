@@ -2,7 +2,7 @@ package com.loopers.infrastructure.coupon
 
 import com.loopers.domain.coupon.Coupon
 import com.loopers.domain.coupon.CouponRepository
-import com.loopers.domain.coupon.PageResult
+import com.loopers.domain.common.PageResult
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
 import org.springframework.stereotype.Component

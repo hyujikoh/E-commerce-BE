@@ -2,7 +2,7 @@ package com.loopers.application.coupon
 
 import com.loopers.domain.coupon.CouponService
 import com.loopers.domain.coupon.CouponType
-import com.loopers.domain.coupon.PageResult
+import com.loopers.domain.common.PageResult
 import org.springframework.stereotype.Component
 import java.time.ZonedDateTime
 
