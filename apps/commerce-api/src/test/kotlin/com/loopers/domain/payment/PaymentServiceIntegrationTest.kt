@@ -65,13 +65,14 @@ class PaymentServiceIntegrationTest @Autowired constructor(
         fun createsPayment_fromReservationSnapshot() {
             val reservation = seedReservation()
 
-            val payment = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo)
+            val creation = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo)
 
             assertAll(
-                { assertThat(payment.status).isEqualTo(PaymentStatus.CREATED) },
-                { assertThat(payment.amount).isEqualTo(Money.krw(100_000)) },
-                { assertThat(payment.orderId).isEqualTo(Payment.orderIdOf(reservation.id)) },
-                { assertThat(payment.guestId).isEqualTo(guestId) },
+                { assertThat(creation.isNew).isTrue() },
+                { assertThat(creation.payment.status).isEqualTo(PaymentStatus.CREATED) },
+                { assertThat(creation.payment.amount).isEqualTo(Money.krw(100_000)) },
+                { assertThat(creation.payment.orderId).isEqualTo(Payment.orderIdOf(reservation.id)) },
+                { assertThat(creation.payment.guestId).isEqualTo(guestId) },
             )
         }
 
@@ -84,7 +85,8 @@ class PaymentServiceIntegrationTest @Autowired constructor(
             val second = paymentService.create(reservation.id, guestId, CardType.KB, cardNo)
 
             assertAll(
-                { assertThat(second.id).isEqualTo(first.id) },
+                { assertThat(second.isNew).isFalse() },
+                { assertThat(second.payment.id).isEqualTo(first.payment.id) },
                 { assertThat(paymentJpaRepository.findByReservationId(reservation.id)).hasSize(1) },
             )
         }
@@ -94,12 +96,13 @@ class PaymentServiceIntegrationTest @Autowired constructor(
         fun createsNewPayment_whenPreviousFailed() {
             val reservation = seedReservation()
             val first = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo)
-            paymentService.markRequestFailed(first.id, "서버 불안정")
+            paymentService.markRequestFailed(first.payment.id, "서버 불안정")
 
             val second = paymentService.create(reservation.id, guestId, CardType.KB, cardNo)
 
             assertAll(
-                { assertThat(second.id).isNotEqualTo(first.id) },
+                { assertThat(second.isNew).isTrue() },
+                { assertThat(second.payment.id).isNotEqualTo(first.payment.id) },
                 { assertThat(paymentJpaRepository.findByReservationId(reservation.id)).hasSize(2) },
             )
         }
@@ -159,7 +162,7 @@ class PaymentServiceIntegrationTest @Autowired constructor(
         @Test
         fun succeedsPayment_onSuccessSnapshot() {
             val reservation = seedReservation()
-            val payment = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo)
+            val payment = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo).payment
 
             val outcome = paymentService.applyPgResult(payment.id, pgTransaction(PgTransactionStatus.SUCCESS))
 
@@ -175,7 +178,7 @@ class PaymentServiceIntegrationTest @Autowired constructor(
         @Test
         fun failsPayment_onFailedSnapshot() {
             val reservation = seedReservation()
-            val payment = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo)
+            val payment = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo).payment
 
             val outcome = paymentService.applyPgResult(payment.id, pgTransaction(PgTransactionStatus.FAILED, "한도초과"))
 
@@ -191,7 +194,7 @@ class PaymentServiceIntegrationTest @Autowired constructor(
         @Test
         fun marksRequested_onPendingSnapshot() {
             val reservation = seedReservation()
-            val payment = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo)
+            val payment = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo).payment
 
             val outcome = paymentService.applyPgResult(payment.id, pgTransaction(PgTransactionStatus.PENDING))
 
@@ -207,7 +210,7 @@ class PaymentServiceIntegrationTest @Autowired constructor(
         @Test
         fun returnsNone_whenAlreadyTerminal() {
             val reservation = seedReservation()
-            val payment = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo)
+            val payment = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo).payment
             paymentService.applyPgResult(payment.id, pgTransaction(PgTransactionStatus.SUCCESS))
 
             val outcome = paymentService.applyPgResult(payment.id, pgTransaction(PgTransactionStatus.FAILED, "한도초과"))
@@ -227,7 +230,7 @@ class PaymentServiceIntegrationTest @Autowired constructor(
         @Test
         fun keepsTerminalState_whenCallbackArrivedFirst() {
             val reservation = seedReservation()
-            val payment = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo)
+            val payment = paymentService.create(reservation.id, guestId, CardType.SAMSUNG, cardNo).payment
             paymentService.applyPgResult(
                 payment.id,
                 PgTransaction("tx-1", "000001", PgTransactionStatus.SUCCESS, null),

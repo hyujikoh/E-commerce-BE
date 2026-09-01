@@ -28,6 +28,9 @@ class PaymentService(
      * 동일 reservationId 동시 요청은 예약 행 잠금으로 직렬화된다.
      * 이미 진행 중(CREATED/REQUESTED)이거나 성공한 결제가 있으면 새로 만들지 않고 그것을 반환한다(멱등).
      * 실패 건(REQUEST_FAILED/FAILED)만 있으면 다른 카드로 재시도할 수 있으므로 새 결제를 생성한다.
+     *
+     * @return [PaymentCreation.isNew] 로 신규 생성/멱등 반환을 구분한다 — 멱등 반환 건에 PG 를
+     * 다시 호출하면 동일 주문에 이중 거래가 생길 수 있으므로, 호출자는 신규 건만 PG 에 요청해야 한다.
      */
     @Transactional
     fun create(
@@ -36,7 +39,7 @@ class PaymentService(
         cardType: CardType,
         cardNo: String,
         now: ZonedDateTime = ZonedDateTime.now(),
-    ): Payment {
+    ): PaymentCreation {
         val reservation = reservationRepository.findWithLock(reservationId)
             ?: throw CoreException(ErrorType.RESERVATION_NOT_FOUND)
         if (reservation.guestId != guestId) {
@@ -50,9 +53,13 @@ class PaymentService(
         }
         paymentRepository.findByReservationId(reservationId)
             .firstOrNull { !it.status.allowsRetry }
-            ?.let { return it }
-        return paymentRepository.save(Payment.create(reservation, cardType, cardNo))
+            ?.let { return PaymentCreation(it, isNew = false) }
+        return PaymentCreation(paymentRepository.save(Payment.create(reservation, cardType, cardNo)), isNew = true)
     }
+
+    /** 예약에 매인 결제 이력 조회(콜백 대상 식별용). */
+    @Transactional(readOnly = true)
+    fun findByReservation(reservationId: Long): List<Payment> = paymentRepository.findByReservationId(reservationId)
 
     /**
      * PG 접수 성공 반영(CREATED → REQUESTED).
@@ -113,6 +120,15 @@ class PaymentService(
         paymentRepository.findWithLock(paymentId)
             ?: throw CoreException(ErrorType.PAYMENT_NOT_FOUND)
 }
+
+/**
+ * [PaymentService.create] 결과. [isNew] 가 false 면 기존 진행 중/성공 건의 멱등 반환이다 —
+ * 이 건으로 PG 결제 생성을 다시 호출하면 안 된다(동일 주문 이중 거래 위험).
+ */
+data class PaymentCreation(
+    val payment: Payment,
+    val isNew: Boolean,
+)
 
 /** [PaymentService.applyPgResult] 가 이번 반영으로 일으킨 변화. */
 enum class PgResultOutcome {
