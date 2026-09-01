@@ -6,7 +6,7 @@ domains:
   - id: accommodation
     path: 숙박/예약
     file: abox/accommodation.yaml
-    summary: 숙소·객실 타입·일자별 재고/요금·찜·예약을 다루는 숙박 커머스 도메인
+    summary: 숙소·객실 타입·일자별 재고/요금·찜·예약·결제(PG 연동)를 다루는 숙박 커머스 도메인
     repos:
       - e-commerce-BE
     infra:

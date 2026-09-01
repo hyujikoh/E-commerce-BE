@@ -21,6 +21,10 @@ enum class ErrorType(val status: HttpStatus, val code: String, val message: Stri
     RESERVATION_NOT_FOUND(HttpStatus.NOT_FOUND, "RESERVATION_NOT_FOUND", "존재하지 않는 예약입니다."),
     RESERVATION_NOT_OWNED(HttpStatus.FORBIDDEN, "RESERVATION_NOT_OWNED", "본인의 예약이 아닙니다."),
 
+    /** 결제 */
+    PAYMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "PAYMENT_NOT_FOUND", "존재하지 않는 결제입니다."),
+    INVALID_PAYMENT_STATE(HttpStatus.CONFLICT, "INVALID_PAYMENT_STATE", "현재 결제 상태에서는 수행할 수 없는 작업입니다."),
+
     /** 쿠폰 */
     INVALID_COUPON(HttpStatus.BAD_REQUEST, "INVALID_COUPON", "쿠폰 정보가 올바르지 않습니다."),
     COUPON_NOT_FOUND(HttpStatus.NOT_FOUND, "COUPON_NOT_FOUND", "존재하지 않는 쿠폰입니다."),

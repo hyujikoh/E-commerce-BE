@@ -29,7 +29,7 @@ class ReservationV1Controller(
             .let { ApiResponse.success(it) }
     }
 
-    // NOTE: 결제 도메인 미연동. 실제로는 결제 성공 webhook 이 트리거한다(후속).
+    // NOTE: 결제 성공 확정은 PG 콜백(PaymentFacade)이 트리거한다. 이 엔드포인트는 수동 운영·테스트용.
     @PostMapping("/{reservationId}/confirm")
     override fun confirm(
         @PathVariable reservationId: Long,
