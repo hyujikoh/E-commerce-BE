@@ -61,6 +61,11 @@ class PaymentService(
     @Transactional(readOnly = true)
     fun findByReservation(reservationId: Long): List<Payment> = paymentRepository.findByReservationId(reservationId)
 
+    /** 결과 미확정(CREATED/REQUESTED) 결제 스캔(상태 동기화 대상 식별용). 잠금 없이 조회한다. */
+    @Transactional(readOnly = true)
+    fun findResultPending(threshold: ZonedDateTime, limit: Int): List<Payment> =
+        paymentRepository.findResultPending(threshold, limit)
+
     /**
      * PG 접수 성공 반영(CREATED → REQUESTED).
      * 콜백이 접수 응답보다 먼저 결과를 반영해 이미 종결됐다면 아무것도 바꾸지 않는다.

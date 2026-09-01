@@ -60,11 +60,14 @@ class PgSimulatorGateway(
         null
     }
 
-    override fun findTransactionsByOrderId(guestId: Long, orderId: String): List<PgTransaction> = try {
+    override fun findTransactionsByOrderId(guestId: Long, orderId: String): List<PgTransaction>? = try {
         circuitCaller.getTransactionsByOrderId(guestId.toString(), orderId).data?.toPgTransactions().orEmpty()
-    } catch (e: Exception) {
-        logger.warn("PG 주문 거래 목록 조회 실패. orderId={}, cause={}", orderId, e.message)
+    } catch (e: FeignException.NotFound) {
+        // PG 는 주문에 거래가 하나도 없으면 404 를 준다 — "거래 없음 확정"이므로 빈 목록으로 구분해 반환한다.
         emptyList()
+    } catch (e: Exception) {
+        logger.warn("PG 주문 거래 목록 조회 실패 — 거래 존재 여부 불명. orderId={}, cause={}", orderId, e.message)
+        null
     }
 
     companion object {

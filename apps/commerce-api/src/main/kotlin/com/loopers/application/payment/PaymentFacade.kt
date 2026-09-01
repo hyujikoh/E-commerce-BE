@@ -10,9 +10,12 @@ import com.loopers.domain.payment.PgPaymentRequest
 import com.loopers.domain.payment.PgRequestResult
 import com.loopers.domain.payment.PgResultOutcome
 import com.loopers.domain.payment.PgTransaction
+import com.loopers.domain.payment.PgTransactionStatus
 import com.loopers.support.error.CoreException
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
+import java.time.Duration
+import java.time.ZonedDateTime
 
 /**
  * 결제 유스케이스 오케스트레이션. PG 호출(외부 HTTP)은 트랜잭션 밖(여기)에서 수행하고,
@@ -100,6 +103,50 @@ class PaymentFacade(
     }
 
     /**
+     * 결과 미확정(CREATED/REQUESTED) 결제의 상태 동기화. 콜백 유실·접수 불명(타임아웃) 건을
+     * PG 조회로 사후 확정한다(스케줄러·수동 복구 공용 진입점).
+     *
+     * [threshold] 이전에 마지막 갱신된 건만 스캔한다 — 방금 만든 결제는 콜백이 정상 도착할
+     * 시간을 준 뒤에 폴링한다. 건별 실패는 로그만 남기고 다음 건을 계속 처리한다.
+     *
+     * @return 동기화를 시도한 건수
+     */
+    fun syncPendingResults(threshold: ZonedDateTime = ZonedDateTime.now().minus(SYNC_GRACE)): Int {
+        val targets = paymentService.findResultPending(threshold, SYNC_BATCH_SIZE)
+        targets.forEach { payment ->
+            runCatching { syncOne(payment) }
+                .onFailure { e -> logger.error("결제 상태 동기화 실패. paymentId={}", payment.id, e) }
+        }
+        return targets.size
+    }
+
+    private fun syncOne(payment: Payment) {
+        val transactionKey = payment.transactionKey
+        if (transactionKey != null) {
+            // REQUESTED — 접수는 됐고 결과 콜백이 유실된 건. 단건 조회로 결과를 가져온다.
+            val transaction = pgPaymentGateway.findTransaction(payment.guestId, transactionKey) ?: return
+            settle(payment.id, payment.guestId, payment.reservationId, transaction)
+            return
+        }
+        // CREATED — 접수 자체가 불명(타임아웃)인 건. 주문 ID 로 거래 존재 여부를 확인한다.
+        val transactions = pgPaymentGateway.findTransactionsByOrderId(payment.guestId, payment.orderId)
+            ?: return // 조회 실패 — 알 수 없으므로 확정하지 않고 다음 회차에 재시도
+        // orderId 는 예약 단위라 이전 시도의 거래가 섞일 수 있다 — 다른 결제가 이미 귀속한 키는 제외한다.
+        val claimedKeys = paymentService.findByReservation(payment.reservationId)
+            .filter { it.id != payment.id }
+            .mapNotNull { it.transactionKey }
+            .toSet()
+        val candidates = transactions.filterNot { it.transactionKey in claimedKeys }
+        if (candidates.isEmpty()) {
+            // PG 에 이 시도의 거래가 없음 확정 — 접수가 안 됐다. 실패 종결해 재시도를 열어준다.
+            paymentService.markRequestFailed(payment.id, "PG 접수가 확인되지 않았습니다. 다시 시도해주세요.")
+            return
+        }
+        val transaction = candidates.firstOrNull { it.status != PgTransactionStatus.PENDING } ?: candidates.first()
+        settle(payment.id, payment.guestId, payment.reservationId, transaction)
+    }
+
+    /**
      * 결제 성공 → 예약 확정. 결제 SUCCESS 는 이미 커밋된 사실이므로(돈이 빠져나갔다),
      * 예약을 확정할 수 없는 상황(홀드 만료·이미 취소)이어도 결제를 롤백하지 않고
      * 심각 로그로 수동 환불 대상임을 드러낸다.
@@ -141,5 +188,9 @@ class PaymentFacade(
 
     companion object {
         private val logger = LoggerFactory.getLogger(PaymentFacade::class.java)
+
+        /** 폴링 전 콜백 대기 유예. PG 처리 지연(1~5s)과 콜백 전송 시간을 감안한다. */
+        private val SYNC_GRACE: Duration = Duration.ofMinutes(1)
+        private const val SYNC_BATCH_SIZE = 100
     }
 }

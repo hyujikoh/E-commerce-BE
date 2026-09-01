@@ -146,16 +146,24 @@ class PgSimulatorGatewayTest {
             val transactions = gateway.findTransactionsByOrderId(guestId = 1L, orderId = "000042")
 
             assertThat(transactions).hasSize(1)
-            assertThat(transactions[0].status).isEqualTo(PgTransactionStatus.FAILED)
+            assertThat(transactions!![0].status).isEqualTo(PgTransactionStatus.FAILED)
             assertThat(transactions[0].orderId).isEqualTo("000042")
         }
 
-        @DisplayName("주문 ID 목록 조회가 실패하면 예외 대신 빈 목록을 반환한다.")
+        @DisplayName("주문에 거래가 없어 PG 가 404 를 주면, 거래 없음 확정으로 빈 목록을 반환한다.")
         @Test
-        fun returnsEmptyList_whenOrderQueryFails() {
-            every { circuitCaller.getTransactionsByOrderId(any(), any()) } throws mockk<FeignException>(relaxed = true)
+        fun returnsEmptyList_whenPgRespondsNotFound() {
+            every { circuitCaller.getTransactionsByOrderId(any(), any()) } throws mockk<FeignException.NotFound>(relaxed = true)
 
             assertThat(gateway.findTransactionsByOrderId(guestId = 1L, orderId = "000042")).isEmpty()
+        }
+
+        @DisplayName("주문 ID 목록 조회가 404 외 이유로 실패하면, 거래 존재 불명이므로 null 을 반환한다.")
+        @Test
+        fun returnsNull_whenOrderQueryFails() {
+            every { circuitCaller.getTransactionsByOrderId(any(), any()) } throws mockk<FeignException>(relaxed = true)
+
+            assertThat(gateway.findTransactionsByOrderId(guestId = 1L, orderId = "000042")).isNull()
         }
     }
 }

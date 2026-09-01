@@ -16,8 +16,15 @@ interface PgPaymentGateway {
     /** transactionKey 로 단건 상태를 조회한다. 조회 실패(장애 포함) 시 null. */
     fun findTransaction(guestId: Long, transactionKey: String): PgTransaction?
 
-    /** 주문 ID 에 매인 거래 목록을 조회한다. 접수 불명(타임아웃) 건의 사후 확인용. 조회 실패 시 빈 목록. */
-    fun findTransactionsByOrderId(guestId: Long, orderId: String): List<PgTransaction>
+    /**
+     * 주문 ID 에 매인 거래 목록을 조회한다. 접수 불명(타임아웃) 건의 사후 확인용.
+     *
+     * 반환의 3분법 — 호출자(상태 동기화)가 "실패 확정" 여부를 가르는 기준이므로 구분이 중요하다:
+     * - 목록: 거래 존재 확정
+     * - 빈 목록: 거래 없음 확정(PG 가 404 로 응답) — 접수 자체가 안 됐다
+     * - null: 조회 실패(장애·타임아웃) — 알 수 없음. 실패 확정하면 안 된다
+     */
+    fun findTransactionsByOrderId(guestId: Long, orderId: String): List<PgTransaction>?
 }
 
 data class PgPaymentRequest(
