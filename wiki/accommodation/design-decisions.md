@@ -91,8 +91,17 @@ UPDATE daily_room_inventory
 
 **왜**:
 - 스케줄러 단독 정리 시 최대 1분 갭에서 만료된 PENDING이 살아있음 → 사용자 경험 보정.
-- 두 경로의 race는 `UPDATE ... WHERE status='PENDING'` affected rows로 가드.
-- `FOR UPDATE SKIP LOCKED`로 스케줄러 다중 인스턴스 안전.
+- 두 경로의 race는 예약 행 `FOR UPDATE` 잠금 후 최신 상태에서 애그리거트 전이 가드로 정리 —
+  잠금으로 직렬화되고, 늦게 도착한 쪽은 갱신된 상태를 보고 no-op(이미 만료됨) 또는
+  `INVALID_RESERVATION_STATE`로 끝난다. 설계 문서의 "affected rows 가드"와 동일한 효과.
+- `FOR UPDATE SKIP LOCKED` 스캔(batch 100)으로 스케줄러 다중 인스턴스 안전.
+
+**구현 특기 (Round 6)**:
+- 만료 정리(상태 전이 + 재고 복구 + 쿠폰 복구)와 확정 실패 응답은 **트랜잭션을 분리**한다 —
+  `Facade.confirm`이 `expire`(별도 tx, 커밋 유지)를 선행 호출한 뒤 예외를 던지므로,
+  실패 응답 때문에 만료 정리까지 롤백되는 문제가 없다.
+- 만료 시각이 지난 PENDING을 사용자가 취소해도 `EXPIRED` 사유로 기록한다 —
+  `CancelReason`은 정산·환불 분기 키이므로 실제 원인을 남긴다.
 
 **리스크**: 결제 성공 webhook이 만료 timer 직후 도착하면 "결제됐는데 예약은 취소" 케이스. 검출·로깅까지만 이번 라운드, 자동 환불 큐는 후속.
 
@@ -210,4 +219,4 @@ ReservationService.create()  ── 단일 트랜잭션 ──
 - 비관적 락(`SELECT ... FOR UPDATE`) → 트랜잭션 길어져 동시성 ↓.
 - 분산 락(Redis) → 인프라·장애 시나리오 복잡. 다중 인스턴스 RDB 진입 시 재검토.
 
-**리스크**: 결제(PG) 미연동 라운드이므로 쿠폰은 PENDING 생성 시점에 즉시 `USED`로 소비된다. 결제 실패/만료로 예약이 CANCELLED되면 쿠폰 복구(USED→AVAILABLE)가 필요 — 자동 복구는 후속(취소·만료 슬라이스).
+**리스크**: 결제(PG) 미연동 라운드이므로 쿠폰은 PENDING 생성 시점에 즉시 `USED`로 소비된다. → Round 6에서 해소: **PENDING에서 취소·만료된 예약만** 쿠폰을 복구한다(`USED→AVAILABLE` 조건부 UPDATE, 멱등). CONFIRMED 취소의 쿠폰·환불 정책은 후속 환불 도메인에서 다룬다.

@@ -23,9 +23,9 @@
 | 더블부킹 방지 (Exception C-1/C-2) | 마지막 1개 동시 예약 → 1건만 성공 | ✅ | `InventoryServiceIntegrationTest$Concurrency` (10스레드) |
 | 다중 일자 원자성 (B5) | 일부 일자 재고 부족 시 전체 롤백 | ✅ | `InventoryServiceIntegrationTest` rollback 테스트 |
 | 가격 잠금 (B2) | PENDING 시점 요금을 ReservationNightly 로 스냅샷 | ✅ | `ReservationServiceIntegrationTest` |
-| 소프트 홀드 10분 (P4) | `expiresAt = now + 10분` | 🟡 | 값 설정·생성은 됨. 만료 스케줄러는 ⬜ |
-| 결제 확정 (Main A 7~8) | 결제 webhook → CONFIRMED | ⬜ | 상태 전이 메서드(`confirm`)는 있음, 연동 ⬜ |
-| 취소/만료 + 재고 복구 (Alt B/D) | cancel/expire + `InventoryService.release` | ⬜ | 상태 전이 메서드 있음, release·스케줄러 ⬜ |
+| 소프트 홀드 10분 (P4) | `expiresAt = now + 10분` | ✅ | Round 6 구현 — 만료 스케줄러 포함 (아래 참조) |
+| 결제 확정 (Main A 7~8) | 결제 webhook → CONFIRMED | 🟡 | confirm API·전이는 Round 6 구현, 결제 webhook 연동 ⬜ |
+| 취소/만료 + 재고 복구 (Alt B/D) | cancel/expire + `InventoryService.release` | ✅ | Round 6 구현 (아래 참조) |
 | 검색 (Main A 1~4) | 도시·기간·인원 검색 + 가격 합산 | ✅ | Round 5 구현 (아래 참조) |
 | 인증 연동 | `@LoopersAuth` 로 guest 식별 | ⬜ | 현재는 요청 body 의 guestId (의도된 슬라이스 한계) |
 
@@ -81,8 +81,23 @@
 | 상세 캐시 | 2회차부터 캐시 적중, 찜 수는 항상 최신 | ✅ | `PropertyFacadeCacheIntegrationTest$DetailCache` |
 | 검색 캐시 | TTL 내 적중, 미스 시 DB 최신 반영 | ✅ | `PropertyFacadeCacheIntegrationTest$SearchCache` |
 
+## Round 6 — 예약 확정/취소/만료 슬라이스
+
+> 검증: `:apps:commerce-api:test` 전체 통과(해피 + 배드 + 동시성).
+
+### 서비스 / 흐름 (AC)
+| AC | 시나리오 | 상태 | 검증 |
+|----|----------|------|------|
+| 예약 확정 (Main A 7~8) | confirm API → PENDING→CONFIRMED. 만료된 홀드는 취소 정리 커밋 후 실패 | ✅ | `ReservationLifecycleIntegrationTest$Confirm`, E2E |
+| 예약 취소 (Alt B, D-1/D-3) | 본인의 PENDING/CONFIRMED 취소 + 재고 복구. 체크인 후 불가 | ✅ | `$Cancel` (본인 검증·상태별·체크인 후) |
+| 취소 사유 기록 | 만료 지난 PENDING 은 사용자 요청이어도 EXPIRED 사유(정산 분기 키) | ✅ | `recordsExpiredReason_whenCancelingOverduePending` |
+| 재고 복구 | 취소·만료 시 점유 일자별 +1 (원자적 UPDATE) | ✅ | `InventoryServiceIntegrationTest$Release` |
+| 쿠폰 복구 | PENDING 취소·만료만 USED→AVAILABLE (CONFIRMED 취소는 후속 환불 도메인) | ✅ | `CouponServiceIntegrationTest$Restore`, `$Cancel` |
+| 소프트 홀드 만료 (P4) | 1분 주기 스케줄러가 만료 PENDING 일괄 취소 (FOR UPDATE SKIP LOCKED, batch 100) | ✅ | `$ExpireOverdue` (만료만 선별·limit) |
+| 만료 경쟁 정합성 | 스케줄러 다중 인스턴스·결제 재진입 동시 만료 → 1회만 처리 | ✅ | `$ConcurrentExpire` (5스레드, 재고 정확히 +1) |
+
 ## 다음 슬라이스 후보
-1. 예약 확정/취소/만료 + `InventoryService.release` + 만료 스케줄러
-2. 결제(PG) webhook 연동 + 도메인 이벤트(outbox)
-3. 인증(`@LoopersAuth`) 연동으로 guestId 제거
-4. 예약 API 인증 일원화 (현재 guestId 본문 값 → 헤더/토큰)
+1. 결제(PG) webhook 연동 + 도메인 이벤트(outbox)
+2. 인증(`@LoopersAuth`) 연동으로 guestId 제거
+3. 예약 API 인증 일원화 (현재 guestId 본문 값 → 헤더/토큰)
+4. NO_SHOW / 자동 체크아웃 스케줄러 (P6/P7)

@@ -18,6 +18,8 @@ enum class ErrorType(val status: HttpStatus, val code: String, val message: Stri
     OUT_OF_INVENTORY(HttpStatus.CONFLICT, "OUT_OF_INVENTORY", "선택한 기간에 잔여 객실이 없습니다."),
     RATE_NOT_FOUND(HttpStatus.NOT_FOUND, "RATE_NOT_FOUND", "요청한 기간의 요금 정보를 찾을 수 없습니다."),
     INVALID_RESERVATION_STATE(HttpStatus.CONFLICT, "INVALID_RESERVATION_STATE", "현재 예약 상태에서는 수행할 수 없는 작업입니다."),
+    RESERVATION_NOT_FOUND(HttpStatus.NOT_FOUND, "RESERVATION_NOT_FOUND", "존재하지 않는 예약입니다."),
+    RESERVATION_NOT_OWNED(HttpStatus.FORBIDDEN, "RESERVATION_NOT_OWNED", "본인의 예약이 아닙니다."),
 
     /** 쿠폰 */
     INVALID_COUPON(HttpStatus.BAD_REQUEST, "INVALID_COUPON", "쿠폰 정보가 올바르지 않습니다."),

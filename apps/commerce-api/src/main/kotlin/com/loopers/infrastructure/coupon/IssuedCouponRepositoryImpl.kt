@@ -35,4 +35,11 @@ class IssuedCouponRepositoryImpl(
             available = IssuedCouponStatus.AVAILABLE,
             usedAt = usedAt,
         )
+
+    override fun restoreIfUsed(id: Long): Int =
+        issuedCouponJpaRepository.restoreIfUsed(
+            id = id,
+            used = IssuedCouponStatus.USED,
+            available = IssuedCouponStatus.AVAILABLE,
+        )
 }
