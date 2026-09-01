@@ -1,0 +1,190 @@
+{
+  "uid": "jvm-monitoring",
+  "title": "JVM Monitoring",
+  "tags": ["jvm", "gc"],
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "timezone": "browser",
+  "editable": true,
+  "templating": {
+    "list": [
+      {
+        "name": "application",
+        "label": "Application",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(jvm_memory_used_bytes, application)",
+        "refresh": 2,
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Heap",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Heap Used vs Max",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(jvm_memory_used_bytes{area=\"heap\", application=\"$application\"})",
+          "legendFormat": "used"
+        },
+        {
+          "expr": "sum(jvm_memory_max_bytes{area=\"heap\", application=\"$application\"})",
+          "legendFormat": "max"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Heap 풀별 사용량 (Eden / Survivor / Old)",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "jvm_memory_used_bytes{area=\"heap\", application=\"$application\"}",
+          "legendFormat": "{{id}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "GC 직후 풀별 사용량 (live set 근사) [커스텀]",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "jvm_gc_pool_used_after_bytes{application=\"$application\"}",
+          "legendFormat": "{{pool}}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Non-Heap",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 9 },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "Non-Heap 풀별 사용량 (Metaspace / CCS / CodeHeap)",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "jvm_memory_used_bytes{area=\"nonheap\", application=\"$application\"}",
+          "legendFormat": "{{id}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Metaspace Used vs Committed",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "jvm_memory_used_bytes{area=\"nonheap\", id=\"Metaspace\", application=\"$application\"}",
+          "legendFormat": "used"
+        },
+        {
+          "expr": "jvm_memory_committed_bytes{area=\"nonheap\", id=\"Metaspace\", application=\"$application\"}",
+          "legendFormat": "committed"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "로드된 클래스 수",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 10 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "jvm_classes_loaded_classes{application=\"$application\"}",
+          "legendFormat": "loaded classes"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "GC",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 18 },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "title": "평균 GC Pause (cause별)",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (gc, cause) (rate(jvm_gc_pause_seconds_sum{application=\"$application\"}[1m])) / sum by (gc, cause) (rate(jvm_gc_pause_seconds_count{application=\"$application\"}[1m]))",
+          "legendFormat": "{{gc}} / {{cause}}"
+        },
+        {
+          "expr": "max by (gc, cause) (jvm_gc_pause_seconds_max{application=\"$application\"})",
+          "legendFormat": "max {{gc}} / {{cause}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "GC 빈도 (초당 횟수)",
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (gc, cause) (rate(jvm_gc_pause_seconds_count{application=\"$application\"}[1m]))",
+          "legendFormat": "{{gc}} / {{cause}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "초당 Heap 회수량 [커스텀]",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum by (gc, cause) (rate(jvm_gc_reclaimed_bytes_sum{application=\"$application\"}[1m]))",
+          "legendFormat": "{{gc}} / {{cause}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "할당률 / 승격률",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 19 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "rate(jvm_gc_memory_allocated_bytes_total{application=\"$application\"}[1m])",
+          "legendFormat": "allocated (Eden 할당)"
+        },
+        {
+          "expr": "rate(jvm_gc_memory_promoted_bytes_total{application=\"$application\"}[1m])",
+          "legendFormat": "promoted (Old 승격)"
+        }
+      ]
+    }
+  ]
+}
