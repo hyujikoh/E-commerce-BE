@@ -24,7 +24,7 @@
 | 다중 일자 원자성 (B5) | 일부 일자 재고 부족 시 전체 롤백 | ✅ | `InventoryServiceIntegrationTest` rollback 테스트 |
 | 가격 잠금 (B2) | PENDING 시점 요금을 ReservationNightly 로 스냅샷 | ✅ | `ReservationServiceIntegrationTest` |
 | 소프트 홀드 10분 (P4) | `expiresAt = now + 10분` | ✅ | Round 6 구현 — 만료 스케줄러 포함 (아래 참조) |
-| 결제 확정 (Main A 7~8) | 결제 webhook → CONFIRMED | 🟡 | confirm API·전이는 Round 6 구현, 결제 webhook 연동 ⬜ |
+| 결제 확정 (Main A 7~8) | 결제 webhook → CONFIRMED | ✅ | Round 6.5 구현 — PG 콜백이 CONFIRMED 트리거 (아래 참조) |
 | 취소/만료 + 재고 복구 (Alt B/D) | cancel/expire + `InventoryService.release` | ✅ | Round 6 구현 (아래 참조) |
 | 검색 (Main A 1~4) | 도시·기간·인원 검색 + 가격 합산 | ✅ | Round 5 구현 (아래 참조) |
 | 인증 연동 | `@LoopersAuth` 로 guest 식별 | ⬜ | 현재는 요청 body 의 guestId (의도된 슬라이스 한계) |
@@ -96,8 +96,34 @@
 | 소프트 홀드 만료 (P4) | 1분 주기 스케줄러가 만료 PENDING 일괄 취소 (FOR UPDATE SKIP LOCKED, batch 100) | ✅ | `$ExpireOverdue` (만료만 선별·limit) |
 | 만료 경쟁 정합성 | 스케줄러 다중 인스턴스·결제 재진입 동시 만료 → 1회만 처리 | ✅ | `$ConcurrentExpire` (5스레드, 재고 정확히 +1) |
 
+## Round 6.5 — PG 결제 연동 + Resilience
+
+> 설계 결정: `design-decisions.md#payment-integration`, `#payment-sync`. 로컬 PG: `apps/pg-simulator`(포트 8082).
+> 검증: `:apps:commerce-api:test` 전체 통과.
+
+### 도메인 모델
+| 항목 | 상태 | 비고 |
+|------|------|------|
+| `Payment` (결제 시도) | ✅ | CREATED→REQUESTED→SUCCESS/FAILED + REQUEST_FAILED. 금액·orderId 는 예약에서 확정 |
+| PG 클라이언트 | ✅ | OpenFeign(연결 1s/읽기 3s) + 서킷 2분리(pg-payment 60% / pg-query 50%) + 예외→결과 타입 흡수 |
+
+### 서비스 / 흐름 (AC)
+| AC | 시나리오 | 상태 | 검증 |
+|----|----------|------|------|
+| 결제 요청 API | POST /api/v1/payments → PG 접수 시 REQUESTED + transactionKey | ✅ | `PaymentV1ApiE2ETest$Pay` |
+| Fallback (Must-Have) | PG 거절·서킷 오픈 → 예외 대신 REQUEST_FAILED 정상 응답 | ✅ | `$Pay`, `PgSimulatorGatewayTest` |
+| Timeout (Must-Have) | 응답 유실 → 실패 확정 없이 CREATED 유지 | ✅ | `$Pay`, `PgSimulatorGatewayTest` |
+| CircuitBreaker (Must-Have) | 결제/조회 서킷 분리, 오픈 시 호출 차단 → Rejected | ✅ | `PgSimulatorGatewayTest` |
+| 멱등 처리 | 동일 reservationId 재요청 → PG 재호출 없이 같은 결제 반환 | ✅ | `$Pay` (verify exactly=1), `PaymentServiceIntegrationTest` |
+| 콜백 → 상태 전이 | PG 재조회 검증 후 SUCCESS→예약 CONFIRMED / FAILED→CANCELLED(PAYMENT_FAILED)+재고 복구 | ✅ | `PaymentV1ApiE2ETest$Callback` |
+| 콜백 위·변조 방어 | 재조회 실패·불일치 시 본문 무시(로그만) | ✅ | `$Callback` 검증 실패 케이스 |
+| 콜백 유실 복구 | 30초 주기 동기화가 REQUESTED 건을 단건 조회로 확정 | ✅ | `PaymentSyncIntegrationTest` |
+| 타임아웃 사후 확정 | CREATED 건을 주문 조회 3분법(존재/404 없음/불명)으로 처리, claimed-key 필터로 이중 결제 방지 | ✅ | `PaymentSyncIntegrationTest` |
+| 유예·스케줄러 게이트 | 1분 유예 내 미스캔, `scheduler.payment-sync.enabled` 스위치 | ✅ | `PaymentSyncIntegrationTest` |
+
 ## 다음 슬라이스 후보
-1. 결제(PG) webhook 연동 + 도메인 이벤트(outbox)
+1. 도메인 이벤트(outbox) 발행 — 취소 이벤트 → 환불 도메인
 2. 인증(`@LoopersAuth`) 연동으로 guestId 제거
 3. 예약 API 인증 일원화 (현재 guestId 본문 값 → 헤더/토큰)
 4. NO_SHOW / 자동 체크아웃 스케줄러 (P6/P7)
+5. 결제 성공-예약 확정 불일치(수동 환불 로그) 건의 자동 환불 큐

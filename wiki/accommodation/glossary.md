@@ -161,6 +161,40 @@ Reservation 1건의 일자별 **가격 스냅샷**. 환불 산정의 기반.
 
 ---
 
+## Payment
+
+예약 1건에 대한 **결제 시도 기록**. 예약(Reservation)과 별개의 생애주기를 가지며, 실패한 시도 뒤에 새 시도가 쌓일 수 있다(1 예약 : N 결제 시도).
+
+| 필드 | 타입 | 설명 |
+|------|------|------|
+| `id` | bigint | PK |
+| `reservation_id` | bigint | FK → Reservation |
+| `guest_id` | bigint | 예약에서 확정한 소유자 |
+| `order_id` | varchar | PG 주문 번호 — 예약 ID 6자리 제로 패딩 (PG 제약: 6자리 이상) |
+| `card_type` | enum | SAMSUNG / KB / HYUNDAI |
+| `card_no` | varchar | 카드 번호 (시뮬레이터 스펙 그대로 보관) |
+| `amount` / `currency` | bigint / char(3) | 예약 가격 스냅샷에서 확정 (요청 본문 아님) |
+| `status` | enum | CREATED / REQUESTED / REQUEST_FAILED / SUCCESS / FAILED |
+| `transaction_key` | varchar nullable | PG 거래 식별자 (접수 후 부여) |
+| `failure_reason` | varchar nullable | 실패 사유 |
+
+**상태 머신**:
+
+```
+CREATED ──(PG 접수)─→ REQUESTED ──(콜백/동기화 SUCCESS)─→ SUCCESS
+   │                      └──────(콜백/동기화 FAILED)──→ FAILED
+   ├──(PG 확정 거절·서킷 오픈)─→ REQUEST_FAILED
+   └──(타임아웃)─→ CREATED 유지 — 상태 동기화가 사후 확정
+```
+
+**불변식**:
+- 금액·orderId·guestId는 예약에서 확정한다 — 요청 본문의 금액을 신뢰하지 않음
+- 진행 중(CREATED/REQUESTED)/성공 결제가 있으면 새 시도를 만들지 않는다(멱등, 예약 행 잠금으로 직렬화)
+- 실패 건(REQUEST_FAILED/FAILED)만 있으면 재시도로 새 결제 생성 가능
+- 종결 상태(SUCCESS/FAILED/REQUEST_FAILED)는 다시 바뀌지 않는다 — 중복 콜백·동시 폴링은 no-op
+
+---
+
 ## Coupon (쿠폰 템플릿)
 
 발급 가능한 **쿠폰의 정의**. admin이 등록·수정·삭제하며, 사용자는 이 템플릿을 발급받아 `IssuedCoupon`을 보유한다.

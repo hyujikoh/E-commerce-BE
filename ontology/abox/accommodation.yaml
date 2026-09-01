@@ -5,7 +5,7 @@
 domain:
   id: accommodation
   name: 숙박 커머스
-  summary: 숙소·객실 타입·일자별 재고/요금·찜·예약을 다루는 도메인. Round 2 설계 확정, Round 3에서 예약 생성 핵심 슬라이스(Reservation·재고 차감·가격 스냅샷) 구현, Round 4에서 찜(Wishlist·찜 수 카운터)과 예약-쿠폰 트랜잭션/락/동시성 구현, Round 5에서 숙소 검색·상세 조회(Property/RoomType·인덱스·Redis 캐시) 구현, Round 6에서 예약 확정·취소·만료(재고/쿠폰 복구·만료 스케줄러) 구현.
+  summary: 숙소·객실 타입·일자별 재고/요금·찜·예약·결제를 다루는 도메인. Round 2 설계 확정, Round 3에서 예약 생성 핵심 슬라이스(Reservation·재고 차감·가격 스냅샷) 구현, Round 4에서 찜(Wishlist·찜 수 카운터)과 예약-쿠폰 트랜잭션/락/동시성 구현, Round 5에서 숙소 검색·상세 조회(Property/RoomType·인덱스·Redis 캐시) 구현, Round 6에서 예약 확정·취소·만료(재고/쿠폰 복구·만료 스케줄러) 구현, Round 6.5에서 PG 결제 연동(결제 API·콜백 검증·상태 동기화·서킷 브레이커) 구현.
   wiki_root: wiki/accommodation/
 
 # ══════════════════════════════════════
@@ -86,6 +86,15 @@ entities:
     package: apps/commerce-api/src/main/kotlin/com/loopers/domain/wishlist
     status: active
 
+  - id: payment
+    name: Payment (결제)
+    type: data
+    summary: 예약 1건에 대한 결제 시도 기록. CREATED → REQUESTED → SUCCESS/FAILED 상태 머신 + 접수 확정 실패(REQUEST_FAILED). 금액·orderId(예약 ID 6자리 패딩)·guestId 는 예약에서 확정하고, 진행 중/성공 결제가 있으면 재생성하지 않는 멱등 가드(예약 행 잠금)로 동일 예약 이중 결제를 차단한다.
+    wiki_doc: wiki/accommodation/glossary.md#payment
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/payment
+    status: active
+
   # ─── Process ───
   - id: property-search
     name: PropertySearch (숙소 검색·상세 조회)
@@ -132,11 +141,29 @@ entities:
     package: apps/commerce-api/src/main/kotlin/com/loopers/domain/wishlist
     status: active
 
+  - id: payment-service
+    name: PaymentService
+    type: process
+    summary: 결제 생성(멱등)과 PG 결과의 DB 반영 담당. PG 호출(외부 HTTP)은 트랜잭션 밖의 PaymentFacade(application/payment)가 수행하고, 이 서비스는 개별 트랜잭션에서 결제 행 잠금 + 종결 상태 no-op 으로 중복 콜백·동시 폴링에 멱등하게 반영한다. 콜백은 본문을 신뢰하지 않고 transactionKey 로 PG 재조회 검증 후 반영.
+    wiki_doc: wiki/accommodation/design-decisions.md#payment-integration
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/domain/payment
+    status: active
+
+  - id: payment-sync-scheduler
+    name: PaymentSyncScheduler
+    type: process
+    summary: 30초 주기로 결과 미확정(CREATED/REQUESTED) 결제를 PG 조회로 사후 확정 — 콜백 유실·접수 응답 유실(타임아웃) 복구 경로. 1분 유예 후 스캔하고, 주문 조회 3분법(목록=존재 확정/빈=없음 확정/null=불명)과 claimed-key 필터로 이중 결제를 막는다. scheduler.payment-sync.enabled 로 끌 수 있다(기본 on).
+    wiki_doc: wiki/accommodation/design-decisions.md#payment-sync
+    repo: e-commerce-BE
+    package: apps/commerce-api/src/main/kotlin/com/loopers/application/payment/scheduler
+    status: active
+
   # ─── External ───
   - id: payment-gateway
     name: PaymentGateway (외부 PG)
     type: external
-    summary: 외부 결제 시스템. 예약 PENDING 생성 후 비동기로 호출되며 webhook으로 성공/실패를 통지한다. 트랜잭션 경계 밖.
+    summary: 외부 결제 시스템. 로컬은 apps/pg-simulator 로 시뮬레이션(요청 성공 60%·처리 성공 70%). PaymentFacade 가 트랜잭션 밖에서 OpenFeign 으로 호출하고 결과는 콜백 + 상태 동기화로 수신. Feign 타임아웃(연결 1s/읽기 3s)과 서킷 브레이커 2분리(pg-payment 임계 60% / pg-query 50%)로 보호. 트랜잭션 경계 밖.
 
 # ══════════════════════════════════════
 # Relations
@@ -206,14 +233,32 @@ relations:
     to: inventory-service
     type: depends_on
     note: 재고 차감·복구를 위임 (B1 합의)
-  - from: reservation-service
-    to: payment-gateway
-    type: references
-    note: 비동기 외부 호출. webhook으로 confirm/fail 콜백 수신
   - from: inventory-service
     to: daily-room-inventory
     type: owns
     note: atomic UPDATE로 remaining 차감·복구
+
+  # ─── 결제 흐름 ───
+  - from: payment-service
+    to: payment
+    type: owns
+    note: Payment 라이프사이클 관리 (멱등 생성·상태 반영). 행 잠금 + 종결 상태 no-op
+  - from: payment
+    to: reservation
+    type: references
+    note: reservation_id 참조. orderId = 예약 ID 6자리 패딩, 금액은 예약 스냅샷에서 확정
+  - from: payment-service
+    to: payment-gateway
+    type: references
+    note: PG 호출은 PaymentFacade(TX 밖) 경유. 접수 결과 3분법 — Accepted/Rejected(확정 실패)/Unknown(타임아웃, 사후 확정)
+  - from: payment-service
+    to: reservation-service
+    type: triggers
+    note: 결제 SUCCESS→confirm, FAILED→cancel(PAYMENT_FAILED). PaymentFacade 가 후속 전이 호출, 확정 실패 시 수동 환불 로그
+  - from: payment-sync-scheduler
+    to: payment-service
+    type: triggers
+    note: 결과 미확정 건을 PG 조회로 settle. 콜백 유실·접수 불명(타임아웃) 복구
 
   # ─── 찜 흐름 ───
   - from: wishlist-service
@@ -276,6 +321,15 @@ relations:
   - from: wishlist-service
     to: mysql
     type: deployed_in
+  - from: payment
+    to: mysql
+    type: deployed_in
+  - from: payment-service
+    to: mysql
+    type: deployed_in
+  - from: payment-sync-scheduler
+    to: mysql
+    type: deployed_in
 
 # ══════════════════════════════════════
 # Notes
@@ -298,8 +352,11 @@ notes:
       벤치마크 시드는 support/seed/Round5SeedRunner(seed 프로필), 측정 결과는 docs/perf/round5-search-optimization.md.
       Round 6: 예약 확정·취소·만료 슬라이스 — reservation-service 생애주기 완성(confirm/cancel/expire/expireOverdue),
       inventory-service.release, coupon 복구(restoreIfUsed), expiration-scheduler 가 `active`.
-      결제 webhook·outbox, NO_SHOW/자동 체크아웃 스케줄러, 환불 산정은 후속.
-      예약·재고·요금 active entity 코드는 apps/commerce-api/.../domain/accommodation 패키지에 flat 배치, 찜은 domain/wishlist, 숙소·객실 타입은 domain/property.
+      Round 6.5: PG 결제 연동 — payment, payment-service, payment-sync-scheduler 가 `active`.
+      결제 오케스트레이션(PG 호출·콜백 검증·예약 후속 전이)은 application/payment/PaymentFacade,
+      PG 클라이언트는 infrastructure/payment/pg(OpenFeign + resilience4j 서킷 2분리 — PgSimulatorCircuitCaller 가 계측, PgSimulatorGateway 가 예외를 결과 타입으로 흡수).
+      로컬 PG 는 apps/pg-simulator 모듈(포트 8082). 도메인 이벤트(outbox), NO_SHOW/자동 체크아웃 스케줄러, 환불 산정은 후속.
+      예약·재고·요금 active entity 코드는 apps/commerce-api/.../domain/accommodation 패키지에 flat 배치, 찜은 domain/wishlist, 숙소·객실 타입은 domain/property, 결제는 domain/payment.
 
   - id: state-machine
     body: |
